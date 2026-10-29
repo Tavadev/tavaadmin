@@ -164,7 +164,7 @@ function normalizarSitio(data) {
   let serviciosFuente = Array.isArray(entrada.servicios) ? entrada.servicios : null;
   if (!serviciosFuente || !serviciosFuente.length) serviciosFuente = base.servicios || [];
   const usados = new Set();
-  const servicios = serviciosFuente.slice(0, 8).map((item, i) => {
+  const servicios = serviciosFuente.slice(0, 30).map((item, i) => {
     const nombre = recorte(item && item.nombre, 60) || `Servicio ${i + 1}`;
     let id = slug((item && item.id) || nombre);
     while (usados.has(id)) id = `${id}-${usados.size + 1}`;
@@ -173,6 +173,7 @@ function normalizarSitio(data) {
     return {
       id,
       activo: !item || item.activo !== false,
+      tipo: item && item.tipo === "producto" ? "producto" : "servicio",
       icono: recorte(item && item.icono, 24) || "</>",
       nombre,
       resumen: recorte(item && item.resumen, 220),
@@ -282,6 +283,7 @@ function sitioPublico(sitio) {
       .filter((item) => item.activo)
       .map((item) => ({
         id: item.id,
+        tipo: item.tipo,
         icono: item.icono,
         nombre: item.nombre,
         resumen: item.resumen,

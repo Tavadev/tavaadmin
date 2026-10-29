@@ -1,5 +1,6 @@
 let sitio = null;
 let vista = "resumen";
+let chatParte = "clientes";
 let servicioId = null;
 let reloj = null;
 
@@ -9,11 +10,13 @@ const aviso = document.getElementById("aviso");
 const TITULOS = {
   resumen: ["HOY", "Resumen"],
   pagina: ["LA PÁGINA", "Textos que ve la gente"],
-  servicios: ["CATÁLOGO", "Servicios"],
   apariencia: ["ESTILO", "Colores e imágenes"],
-  bot: ["WHATSAPP", "Cómo conversa el asistente"],
-  cotizaciones: ["BANDEJA", "Cotizaciones"],
-  whatsapp: ["DISPOSITIVO", "Vincular WhatsApp"],
+};
+const TITULOS_CHAT = {
+  clientes: ["CHATBOT", "Seguimiento de clientes"],
+  registro: ["CHATBOT", "Registro de productos y servicios"],
+  dispositivo: ["CHATBOT", "Vincular el celular"],
+  mensajes: ["CHATBOT", "Cómo conversa"],
 };
 
 function esc(valor) {
@@ -145,10 +148,11 @@ function pintarNav() {
   document.querySelectorAll("[data-nav]").forEach((btn) => {
     btn.classList.toggle("activa", btn.dataset.nav === vista);
   });
-  const [etiqueta, titulo] = TITULOS[vista];
+  const [etiqueta, titulo] = vista === "chatbot" ? TITULOS_CHAT[chatParte] : TITULOS[vista];
   document.getElementById("etiqueta").textContent = etiqueta;
   document.getElementById("titulo").textContent = titulo;
-  document.getElementById("guardar").hidden = ["resumen", "cotizaciones", "whatsapp"].includes(vista);
+  const edita = vista === "pagina" || vista === "apariencia" || (vista === "chatbot" && (chatParte === "registro" || chatParte === "mensajes"));
+  document.getElementById("guardar").hidden = !edita;
 }
 
 async function pintarResumen() {
@@ -159,7 +163,7 @@ async function pintarResumen() {
   nums.className = "metricas";
   const nuevas = cotas.filter((item) => item.estado === "nueva").length;
   const bloques = [
-    ["Cotizaciones", cotas.length],
+    ["Clientes", cotas.length],
     ["Sin revisar", nuevas],
     ["WhatsApp", estado.whatsapp && estado.whatsapp.titulo],
   ];
@@ -280,8 +284,9 @@ function servicioActual() {
   return sitio.servicios.find((item) => item.id === servicioId) || sitio.servicios[0];
 }
 
-function pintarServicios() {
-  vistaEl.innerHTML = "";
+function pintarServicios(nodo) {
+  const caja = nodo || vistaEl;
+  caja.innerHTML = "";
   if (!servicioId || !sitio.servicios.some((item) => item.id === servicioId)) {
     servicioId = sitio.servicios[0] && sitio.servicios[0].id;
   }
@@ -293,7 +298,7 @@ function pintarServicios() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "item" + (item.id === servicioId ? " activa" : "");
-    btn.textContent = item.nombre + (item.activo ? "" : " (oculto)");
+    btn.textContent = (item.tipo === "producto" ? "Producto" : "Servicio") + " · " + item.nombre + (item.activo ? "" : " · oculto");
     btn.onclick = () => {
       servicioId = item.id;
       pintar();
@@ -303,14 +308,15 @@ function pintarServicios() {
   const nuevo = document.createElement("button");
   nuevo.type = "button";
   nuevo.className = "suave";
-  nuevo.textContent = "Nuevo servicio";
+  nuevo.textContent = "Agregar";
   nuevo.onclick = () => {
-    const id = "servicio-" + Date.now().toString(36);
+    const id = "item-" + Date.now().toString(36);
     sitio.servicios.push({
       id,
       activo: true,
+      tipo: "servicio",
       icono: "</>",
-      nombre: "Nuevo servicio",
+      nombre: "Nuevo",
       resumen: "",
       tono: "lila",
       imagen: "",
@@ -323,7 +329,7 @@ function pintarServicios() {
   lista.append(nuevo);
 
   const actual = servicioActual();
-  const editor = tarjeta("Este servicio", "Sin precio. La gente pide cotización y el bot hace estas preguntas.");
+  const editor = tarjeta("Ficha", "Elige si es un producto o un servicio. Sin precio. El bot hace las preguntas de abajo.");
   if (actual) {
     const tono = document.createElement("label");
     tono.className = "campo";
@@ -345,7 +351,24 @@ function pintarServicios() {
     check.checked = actual.activo !== false;
     check.onchange = () => (actual.activo = check.checked);
     activo.append(check, document.createTextNode("Visible en la página y en el bot"));
+    const tipo = document.createElement("label");
+    tipo.className = "campo";
+    const tipoSpan = document.createElement("span");
+    tipoSpan.textContent = "Qué es";
+    const tipoSelect = document.createElement("select");
+    [["servicio", "Servicio"], ["producto", "Producto"]].forEach(([valor, nombre]) => {
+      const op = document.createElement("option");
+      op.value = valor;
+      op.textContent = nombre;
+      if ((actual.tipo || "servicio") === valor) op.selected = true;
+      tipoSelect.append(op);
+    });
+    tipoSelect.onchange = () => {
+      actual.tipo = tipoSelect.value;
+    };
+    tipo.append(tipoSpan, tipoSelect);
     editor.append(
+      tipo,
       campo("Nombre", actual.nombre, (v) => (actual.nombre = v)),
       campo("Resumen", actual.resumen, (v) => (actual.resumen = v), "area"),
       campo("Símbolo", actual.icono, (v) => (actual.icono = v)),
@@ -387,7 +410,7 @@ function pintarServicios() {
     const borrarServicio = document.createElement("button");
     borrarServicio.type = "button";
     borrarServicio.className = "peligro";
-    borrarServicio.textContent = "Eliminar servicio";
+    borrarServicio.textContent = "Eliminar";
     borrarServicio.onclick = () => {
       if (sitio.servicios.length < 2) return toast("Deja al menos un servicio");
       sitio.servicios = sitio.servicios.filter((item) => item.id !== actual.id);
@@ -418,7 +441,7 @@ function pintarServicios() {
     editor.append(mover);
   }
   layout.append(lista, editor);
-  vistaEl.append(layout);
+  caja.append(layout);
 }
 
 const COLORES = [
@@ -473,9 +496,10 @@ function pintarApariencia() {
   vistaEl.append(fotos, colores);
 }
 
-function pintarBot() {
-  vistaEl.innerHTML = "";
-  const textos = tarjeta("Mensajes", "El bot agrega solo la lista numerada de servicios. No la escribas aquí.");
+function pintarBot(nodo) {
+  const caja = nodo || vistaEl;
+  caja.innerHTML = "";
+  const textos = tarjeta("Mensajes", "El bot agrega solo la lista numerada. No la escribas aquí.");
   const campos = [
     ["bienvenida", "Saludo", "area"],
     ["pedirNombre", "Pide el nombre", "text"],
@@ -490,7 +514,7 @@ function pintarBot() {
   campos.forEach(([clave, etiqueta, tipo]) => {
     textos.append(campo(etiqueta, sitio.bot[clave], (v) => (sitio.bot[clave] = v), tipo));
   });
-  const avisos = tarjeta("Avisos", "Cuando llegue una cotización, el bot escribe a estos números o grupos. Tú atiendes desde tu WhatsApp.");
+  const avisos = tarjeta("Avisos", "Cuando llegue un cliente, el bot escribe a estos números. Tú atiendes desde tu WhatsApp.");
   sitio.bot.avisos.forEach((avisoItem, i) => {
     const fila = document.createElement("div");
     fila.className = "rejilla";
@@ -517,18 +541,19 @@ function pintarBot() {
     pintar();
   };
   avisos.append(add);
-  vistaEl.append(textos, avisos);
+  caja.append(textos, avisos);
 }
 
-async function pintarCotizaciones() {
-  vistaEl.innerHTML = "<p class='ayuda'>Cargando…</p>";
+async function pintarCotizaciones(nodo) {
+  const caja = nodo || vistaEl;
+  caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
   const [cotas, pausas] = await Promise.all([api("/api/admin/cotizaciones"), api("/api/admin/pausas")]);
-  vistaEl.innerHTML = "";
-  const card = tarjeta("Solicitudes", "Las de la página y las del chat llegan al mismo lugar.");
+  caja.innerHTML = "";
+  const card = tarjeta("Clientes", "Aquí queda quien escribió por la página o por WhatsApp. Cambia el estado según cómo vaya la conversación.");
   if (!cotas.length) {
     const p = document.createElement("p");
     p.className = "ayuda";
-    p.textContent = "Todavía no hay cotizaciones.";
+    p.textContent = "Todavía no hay clientes.";
     card.append(p);
   }
   const pausados = new Set(pausas.map((item) => String(item.celular || "").replace(/\D/g, "").slice(-10)));
@@ -621,7 +646,7 @@ async function pintarCotizaciones() {
     borrar.className = "peligro";
     borrar.textContent = "Eliminar";
     borrar.onclick = async () => {
-      if (!confirm("¿Eliminar esta cotización?")) return;
+      if (!confirm("¿Quitar a esta persona del seguimiento?")) return;
       await api("/api/admin/cotizaciones/" + encodeURIComponent(item.id), { method: "DELETE" });
       pintar();
     };
@@ -629,14 +654,13 @@ async function pintarCotizaciones() {
     bloque.append(cabeza, meta, cuerpo, estado, nota, acciones);
     card.append(bloque);
   });
-  vistaEl.append(card);
+  caja.append(card);
 }
 
-async function pintarWhatsapp() {
-  vistaEl.innerHTML = "";
-  const card = tarjeta("Vincular el celular", "WhatsApp Business, o WhatsApp, luego dispositivos vinculados. El nombre del dispositivo es TAVADEV. Confírmalo, no lo escribas.");
-  const estado = document.createElement("div");
-  estado.id = "wa-estado";
+async function pintarWhatsapp(nodo) {
+  const caja = nodo || vistaEl;
+  caja.innerHTML = "";
+  const card = tarjeta("Vincular el celular", "WhatsApp, luego dispositivos vinculados. El nombre del dispositivo es TAVADEV. Confírmalo, no lo escribas.");
   const h = document.createElement("h2");
   h.id = "wa-titulo";
   h.textContent = "Revisando…";
@@ -651,46 +675,11 @@ async function pintarWhatsapp() {
   const logs = document.createElement("div");
   logs.id = "wa-logs";
   logs.className = "logs";
-  const gruposBtn = document.createElement("button");
-  gruposBtn.type = "button";
-  gruposBtn.className = "suave";
-  gruposBtn.textContent = "Buscar mis grupos";
-  const grupos = document.createElement("div");
-  gruposBtn.onclick = async () => {
-    grupos.textContent = "Buscando…";
-    try {
-      const data = await api("/api/admin/grupos");
-      grupos.innerHTML = "";
-      if (!data.conectado) {
-        grupos.textContent = "Primero vincula el celular.";
-        return;
-      }
-      if (!data.grupos.length) {
-        grupos.textContent = "No aparecieron grupos.";
-        return;
-      }
-      data.grupos.forEach((grupo) => {
-        const fila = document.createElement("p");
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "suave";
-        b.textContent = "Usar para avisos";
-        b.onclick = () => {
-          sitio.bot.avisos.push({ nombre: grupo.nombre, valor: grupo.id });
-          toast("Quedó en Conversación. Entra allá y guarda.");
-        };
-        fila.append(document.createTextNode(grupo.nombre + " "), b);
-        grupos.append(fila);
-      });
-    } catch (error) {
-      grupos.textContent = error.message;
-    }
-  };
-  card.append(estado, h, p, img, gruposBtn, grupos, logs);
-  vistaEl.append(card);
+  card.append(h, p, img, logs);
+  caja.append(card);
 
   async function refrescar() {
-    if (vista !== "whatsapp") return;
+    if (vista !== "chatbot" || chatParte !== "dispositivo") return;
     try {
       const data = await api("/api/admin/whatsapp");
       h.textContent = data.titulo;
@@ -710,16 +699,46 @@ async function pintarWhatsapp() {
   reloj = setInterval(refrescar, 4000);
 }
 
+function subnavChat() {
+  const barra = document.createElement("div");
+  barra.className = "fila subnav";
+  [
+    ["clientes", "Seguimiento"],
+    ["registro", "Registro"],
+    ["dispositivo", "Dispositivo"],
+    ["mensajes", "Mensajes"],
+  ].forEach(([id, nombre]) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "suave" + (chatParte === id ? " activa" : "");
+    btn.textContent = nombre;
+    btn.onclick = () => {
+      chatParte = id;
+      ir("chatbot");
+    };
+    barra.append(btn);
+  });
+  return barra;
+}
+
+async function pintarChatbot() {
+  vistaEl.innerHTML = "";
+  vistaEl.append(subnavChat());
+  const caja = document.createElement("div");
+  vistaEl.append(caja);
+  if (chatParte === "clientes") return pintarCotizaciones(caja);
+  if (chatParte === "registro") return pintarServicios(caja);
+  if (chatParte === "dispositivo") return pintarWhatsapp(caja);
+  return pintarBot(caja);
+}
+
 async function pintar() {
   pintarNav();
   try {
     if (vista === "resumen") return await pintarResumen();
     if (vista === "pagina") return pintarPagina();
-    if (vista === "servicios") return pintarServicios();
     if (vista === "apariencia") return pintarApariencia();
-    if (vista === "bot") return pintarBot();
-    if (vista === "cotizaciones") return await pintarCotizaciones();
-    if (vista === "whatsapp") return await pintarWhatsapp();
+    if (vista === "chatbot") return await pintarChatbot();
   } catch (error) {
     vistaEl.innerHTML = "";
     const p = document.createElement("p");

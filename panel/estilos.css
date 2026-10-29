@@ -76,6 +76,8 @@ input, textarea, select {
 }
 textarea { min-height: 90px; resize: vertical; }
 .fila { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.subnav { margin-bottom: 16px; }
+.subnav button.activa { background: var(--acento); color: white; box-shadow: none; }
 .mini { width: 92px; height: 92px; object-fit: cover; border-radius: 14px; background: #f6f0ff; }
 .colores { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .color { display: flex; flex-direction: column; gap: 6px; font-size: 0.88rem; }

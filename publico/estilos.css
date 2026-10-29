@@ -178,7 +178,13 @@ h1 {
   font-family: "Space Mono", monospace;
   font-weight: 700;
   font-size: 1.15rem;
-  margin-bottom: 18px;
+  margin-bottom: 8px;
+}
+.servicio .tipo {
+  margin: 0 0 8px;
+  font-family: "Space Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
 }
 .servicio h3 { margin: 0 0 8px; font-size: 1.35rem; letter-spacing: -0.4px; }
 .servicio p { margin: 0; flex: 1; }

@@ -60,6 +60,7 @@ function pintar(sitio) {
       const foto = urlSegura(item.imagen);
       return `<article class="servicio tono-${esc(item.tono || "lila")}">
         ${foto ? `<img class="cover" src="${esc(foto)}" alt="" />` : `<div class="icono">${esc(item.icono || "</>")}</div>`}
+        <p class="tipo">${item.tipo === "producto" ? "Producto" : "Servicio"}</p>
         <h3>${esc(item.nombre)}</h3>
         <p>${esc(item.resumen)}</p>
         <button type="button" class="boton-solido" data-servicio="${esc(item.id)}">Quiero este</button>
