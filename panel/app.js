@@ -1192,6 +1192,54 @@ async function pintarPedidos() {
   vistaEl.append(alta, lista);
 }
 
+function ordenArbol(lista, campo) {
+  const ids = new Set(lista.map((item) => item.id));
+  const hijos = new Map();
+  lista.forEach((item) => {
+    const padre = item[campo] && ids.has(item[campo]) ? item[campo] : "";
+    if (!hijos.has(padre)) hijos.set(padre, []);
+    hijos.get(padre).push(item);
+  });
+  const salida = [];
+  function bajar(padre, nivel) {
+    (hijos.get(padre) || []).forEach((item) => {
+      salida.push({ item, nivel });
+      bajar(item.id, nivel + 1);
+    });
+  }
+  bajar("", 0);
+  return salida;
+}
+
+function opcionesDeArbol(lista, campo, excluirId, raiz) {
+  const ids = new Set(lista.map((item) => item.id));
+  const hijos = new Map();
+  lista.forEach((item) => {
+    const padre = item[campo] && ids.has(item[campo]) ? item[campo] : "";
+    if (!hijos.has(padre)) hijos.set(padre, []);
+    hijos.get(padre).push(item);
+  });
+  const prohibidos = new Set();
+  if (excluirId) {
+    const pila = [excluirId];
+    while (pila.length) {
+      const id = pila.pop();
+      if (prohibidos.has(id)) continue;
+      prohibidos.add(id);
+      (hijos.get(id) || []).forEach((item) => pila.push(item.id));
+    }
+  }
+  const opciones = [{ id: "", nombre: raiz }];
+  function caminar(padre, prefijo) {
+    (hijos.get(padre) || []).forEach((item) => {
+      if (!prohibidos.has(item.id)) opciones.push({ id: item.id, nombre: prefijo + item.nombre });
+      caminar(item.id, prefijo + item.nombre + " / ");
+    });
+  }
+  caminar("", "");
+  return opciones;
+}
+
 function textoRamas(cantidad) {
   const n = Number(cantidad) || 0;
   if (n === 1) return "1 rama";
@@ -1288,17 +1336,14 @@ async function pintarEquipo() {
   caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
   const [equipos, personas] = await Promise.all([api("/api/admin/equipos"), api("/api/admin/personas")]);
   caja.innerHTML = "";
-  const equiposCard = tarjeta("Equipos", "Un equipo puede colgar de otro. Quien no cuelga de nadie queda arriba del organigrama.");
+  const equiposCard = tarjeta("Conectar equipos", "Crea el equipo y, en la lista, elige de cuál cuelga. El que no cuelga de nadie queda arriba.");
   const equipoNuevo = { nombre: "", descripcion: "", padreId: "" };
-  const padreLabel = document.createElement("label");
-  padreLabel.className = "campo";
-  padreLabel.append(Object.assign(document.createElement("span"), { textContent: "Cuelga de" }));
-  padreLabel.append(selectDe([{ id: "", nombre: "De nadie, queda arriba" }].concat(equipos.map((item) => ({ id: item.id, nombre: item.nombre }))), "", (v) => (equipoNuevo.padreId = v)));
-  equiposCard.append(
-    campo("Nombre", "", (v) => (equipoNuevo.nombre = v)),
-    campo("Para qué es", "", (v) => (equipoNuevo.descripcion = v)),
-    padreLabel,
-  );
+  const alta = document.createElement("div");
+  alta.className = "liga";
+  const padreNuevo = document.createElement("label");
+  padreNuevo.className = "campo";
+  padreNuevo.append(Object.assign(document.createElement("span"), { textContent: "Este equipo cuelga de" }));
+  padreNuevo.append(selectDe(opcionesDeArbol(equipos, "padreId", "", "De nadie. Queda arriba"), "", (v) => (equipoNuevo.padreId = v)));
   const addEquipo = document.createElement("button");
   addEquipo.type = "button";
   addEquipo.className = "primario";
@@ -1310,17 +1355,42 @@ async function pintarEquipo() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(equipoNuevo),
       });
+      toast("Equipo agregado");
       pintar();
     } catch (error) {
       toast(error.message);
     }
   };
-  equiposCard.append(addEquipo);
-  equipos.forEach((equipo) => {
+  alta.append(campo("Nombre del equipo", "", (v) => (equipoNuevo.nombre = v)), padreNuevo, addEquipo);
+  equiposCard.append(alta);
+  if (!equipos.length) {
+    const vacio = document.createElement("p");
+    vacio.className = "ayuda";
+    vacio.textContent = "Todavía no hay equipos. El primero déjalo en «De nadie».";
+    equiposCard.append(vacio);
+  }
+  ordenArbol(equipos, "padreId").forEach(({ item: equipo, nivel }) => {
     const fila = document.createElement("div");
-    fila.className = "fila";
+    fila.className = "liga";
+    fila.style.paddingLeft = nivel * 22 + "px";
     const nombre = document.createElement("strong");
-    nombre.textContent = equipo.nombre;
+    nombre.textContent = (nivel ? "↳ " : "") + equipo.nombre;
+    const elegir = document.createElement("label");
+    elegir.className = "campo";
+    elegir.append(Object.assign(document.createElement("span"), { textContent: "Cuelga de" }));
+    elegir.append(selectDe(opcionesDeArbol(equipos, "padreId", equipo.id, "De nadie. Queda arriba"), equipo.padreId || "", async (valor) => {
+      try {
+        await api("/api/admin/equipos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...equipo, padreId: valor }),
+        });
+        toast(valor ? "Quedó conectado" : "Quedó arriba");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
     const borrar = document.createElement("button");
     borrar.type = "button";
     borrar.className = "suave";
@@ -1329,32 +1399,22 @@ async function pintarEquipo() {
       await api("/api/admin/equipos/" + encodeURIComponent(equipo.id), { method: "DELETE" });
       pintar();
     };
-    const padre = equipos.find((item) => item.id === equipo.padreId);
-    const meta = document.createElement("span");
-    meta.className = "ayuda";
-    meta.textContent = padre ? "cuelga de " + padre.nombre : "arriba";
-    fila.append(nombre, meta, borrar);
-    if (equipo.descripcion) {
-      const ayuda = document.createElement("span");
-      ayuda.className = "ayuda";
-      ayuda.textContent = equipo.descripcion;
-      fila.append(ayuda);
-    }
+    fila.append(nombre, elegir, borrar);
     equiposCard.append(fila);
   });
-  const gente = tarjeta("Personas", "El cargo y a quién reportan arman el organigrama.");
+  const gente = tarjeta("Conectar personas", "Abajo de cada persona eliges a quién reporta. Eso arma las ramas del organigrama.");
   const persona = { nombre: "", cargo: "", celular: "", correo: "", equipoId: "", reportaA: "", nota: "" };
-  const red = document.createElement("div");
-  red.className = "rejilla";
+  const altaPersona = document.createElement("div");
+  altaPersona.className = "rejilla";
   const equipoLabel = document.createElement("label");
   equipoLabel.className = "campo";
   equipoLabel.append(Object.assign(document.createElement("span"), { textContent: "Equipo" }));
-  equipoLabel.append(selectDe([{ id: "", nombre: "Sin equipo" }].concat(equipos.map((item) => ({ id: item.id, nombre: item.nombre }))), "", (v) => (persona.equipoId = v)));
+  equipoLabel.append(selectDe([{ id: "", nombre: "Sin equipo" }].concat(opcionesDeArbol(equipos, "padreId", "", "").slice(1)), "", (v) => (persona.equipoId = v)));
   const jefeLabel = document.createElement("label");
   jefeLabel.className = "campo";
   jefeLabel.append(Object.assign(document.createElement("span"), { textContent: "Reporta a" }));
-  jefeLabel.append(selectDe([{ id: "", nombre: "A nadie, queda arriba" }].concat(personas.map((item) => ({ id: item.id, nombre: item.nombre }))), "", (v) => (persona.reportaA = v)));
-  red.append(
+  jefeLabel.append(selectDe(opcionesDeArbol(personas, "reportaA", "", "A nadie. Queda arriba"), "", (v) => (persona.reportaA = v)));
+  altaPersona.append(
     campo("Nombre", "", (v) => (persona.nombre = v)),
     campo("Cargo", "", (v) => (persona.cargo = v)),
     campo("Celular", "", (v) => (persona.celular = v)),
@@ -1379,26 +1439,38 @@ async function pintarEquipo() {
       toast(error.message);
     }
   };
-  gente.append(red, addPersona);
-  personas.forEach((item) => {
-    const fila = document.createElement("article");
-    fila.className = "cota";
-    const jefe = personas.find((personaItem) => personaItem.id === item.reportaA);
-    const equipo = equipos.find((equipoItem) => equipoItem.id === item.equipoId);
-    const p = document.createElement("p");
-    p.innerHTML = `<strong>${esc(item.nombre)}</strong> · ${esc(item.cargo || "Sin cargo")}`;
-    const meta = document.createElement("p");
-    meta.className = "ayuda";
-    meta.textContent = [equipo && equipo.nombre, jefe ? "reporta a " + jefe.nombre : "arriba del organigrama", item.celular, item.correo].filter(Boolean).join(" · ");
+  gente.append(altaPersona, addPersona);
+  ordenArbol(personas, "reportaA").forEach(({ item, nivel }) => {
+    const fila = document.createElement("div");
+    fila.className = "liga";
+    fila.style.paddingLeft = nivel * 22 + "px";
+    const nombre = document.createElement("strong");
+    nombre.textContent = (nivel ? "↳ " : "") + item.nombre + (item.cargo ? " · " + item.cargo : "");
+    const elegir = document.createElement("label");
+    elegir.className = "campo";
+    elegir.append(Object.assign(document.createElement("span"), { textContent: "Reporta a" }));
+    elegir.append(selectDe(opcionesDeArbol(personas, "reportaA", item.id, "A nadie. Queda arriba"), item.reportaA || "", async (valor) => {
+      try {
+        await api("/api/admin/personas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...item, reportaA: valor }),
+        });
+        toast(valor ? "Quedó conectada" : "Quedó arriba");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
     const borrar = document.createElement("button");
     borrar.type = "button";
-    borrar.className = "peligro";
+    borrar.className = "suave";
     borrar.textContent = "Quitar";
     borrar.onclick = async () => {
       await api("/api/admin/personas/" + encodeURIComponent(item.id), { method: "DELETE" });
       pintar();
     };
-    fila.append(p, meta, borrar);
+    fila.append(nombre, elegir, borrar);
     gente.append(fila);
   });
   caja.append(equiposCard, gente);
