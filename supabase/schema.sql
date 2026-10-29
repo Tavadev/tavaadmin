@@ -164,8 +164,22 @@ create table if not exists equipos (
   id text primary key,
   nombre text not null,
   descripcion text not null default '',
-  orden int not null default 0
+  orden int not null default 0,
+  padre_id text
 );
+
+alter table equipos add column if not exists padre_id text;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'equipos_padre_id_fkey') then
+    alter table equipos
+      add constraint equipos_padre_id_fkey
+      foreign key (padre_id) references equipos(id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists equipos_padre_idx on equipos (padre_id);
 
 create table if not exists personas (
   id text primary key,

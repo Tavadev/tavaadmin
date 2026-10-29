@@ -623,14 +623,29 @@ async function borrarPedido(id) {
   return true;
 }
 
+function filaEquipo(row) {
+  return {
+    id: row.id,
+    nombre: row.nombre,
+    descripcion: row.descripcion || "",
+    orden: row.orden || 0,
+    padreId: row.padre_id || row.padreId || "",
+  };
+}
+
+function faltaColumnaPadre(error) {
+  const msg = String((error && error.message) || "");
+  return /padre_id|42703|PGRST204/i.test(msg);
+}
+
 async function listarEquipos() {
   if (await tablasNuevas()) {
     const { data, error } = await clienteSupabase().from("equipos").select("*").order("orden");
     if (error) throw new Error(error.message);
-    return (data || []).map((row) => ({ id: row.id, nombre: row.nombre, descripcion: row.descripcion || "", orden: row.orden }));
+    return (data || []).map(filaEquipo);
   }
   if (usaSupabase()) exigirTablas();
-  return leerLocal().equipos;
+  return leerLocal().equipos.map(filaEquipo);
 }
 
 async function guardarEquipo(entrada) {
@@ -638,15 +653,30 @@ async function guardarEquipo(entrada) {
   if (nombre.length < 2) throw new Error("Ponle nombre al equipo");
   const lista = await listarEquipos();
   const id = entrada.id || idCorto("EQ-");
+  const padreId = recorte(entrada.padreId, 40);
+  if (padreId && padreId === id) throw new Error("Un equipo no puede colgar de sí mismo");
+  if (padreId && !lista.some((item) => item.id === padreId)) throw new Error("Elige de qué equipo cuelga");
+  const prueba = lista.filter((item) => item.id !== id).concat([{ id, padreId }]);
+  if (padreId && hayCiclo(prueba, id, padreId, "padreId")) throw new Error("Eso formaría un círculo entre equipos");
   const actual = lista.find((item) => item.id === id);
   const fila = {
     id,
     nombre,
     descripcion: recorte(entrada.descripcion, 200),
     orden: actual ? actual.orden : lista.length,
+    padreId,
   };
   if (await tablasNuevas()) {
-    const { error } = await clienteSupabase().from("equipos").upsert(fila);
+    const { error } = await clienteSupabase().from("equipos").upsert({
+      id: fila.id,
+      nombre: fila.nombre,
+      descripcion: fila.descripcion,
+      orden: fila.orden,
+      padre_id: fila.padreId || null,
+    });
+    if (error && faltaColumnaPadre(error)) {
+      throw new Error("Falta relacionar los equipos en Supabase. Vuelve a pegar supabase/schema.sql y dale Run.");
+    }
     if (error) throw new Error(error.message);
     return fila;
   }
@@ -661,8 +691,11 @@ async function guardarEquipo(entrada) {
 
 async function borrarEquipo(id) {
   if (await tablasNuevas()) {
-    await clienteSupabase().from("personas").update({ equipo_id: null }).eq("equipo_id", id);
-    const { error } = await clienteSupabase().from("equipos").delete().eq("id", id);
+    const client = clienteSupabase();
+    await client.from("personas").update({ equipo_id: null }).eq("equipo_id", id);
+    const suelta = await client.from("equipos").update({ padre_id: null }).eq("padre_id", id);
+    if (suelta.error && !faltaColumnaPadre(suelta.error)) throw new Error(suelta.error.message);
+    const { error } = await client.from("equipos").delete().eq("id", id);
     if (error) throw new Error(error.message);
     return true;
   }
@@ -670,6 +703,9 @@ async function borrarEquipo(id) {
   const data = leerLocal();
   data.personas.forEach((persona) => {
     if (persona.equipoId === id) persona.equipoId = "";
+  });
+  data.equipos.forEach((equipo) => {
+    if (equipo.padreId === id) equipo.padreId = "";
   });
   data.equipos = data.equipos.filter((item) => item.id !== id);
   escribirJson(data);
@@ -701,14 +737,14 @@ async function listarPersonas() {
   return leerLocal().personas.map(filaPersona);
 }
 
-function hayCiclo(personas, id, reportaA) {
-  let cursor = reportaA;
+function hayCiclo(lista, id, destino, campo) {
+  let cursor = destino;
   const vistos = new Set([id]);
   while (cursor) {
     if (vistos.has(cursor)) return true;
     vistos.add(cursor);
-    const jefe = personas.find((item) => item.id === cursor);
-    cursor = jefe && jefe.reportaA;
+    const nodo = lista.find((item) => item.id === cursor);
+    cursor = nodo && nodo[campo];
   }
   return false;
 }
@@ -724,7 +760,7 @@ async function guardarPersona(entrada) {
     throw new Error("Elige a quién reporta dentro del equipo");
   }
   const prueba = lista.filter((item) => item.id !== id).concat([{ id, reportaA }]);
-  if (reportaA && hayCiclo(prueba, id, reportaA)) throw new Error("Eso formaría un círculo en el organigrama");
+  if (reportaA && hayCiclo(prueba, id, reportaA, "reportaA")) throw new Error("Eso formaría un círculo en el organigrama");
   const actual = lista.find((item) => item.id === id);
   const equipos = await listarEquipos();
   let equipoId = recorte(entrada.equipoId, 40);
@@ -794,6 +830,7 @@ function arbol(personas) {
     hijos.get(padre).push(persona);
   });
   function nodo(persona) {
+    const ramas = (hijos.get(persona.id) || []).map(nodo);
     return {
       id: persona.id,
       nombre: persona.nombre,
@@ -801,7 +838,30 @@ function arbol(personas) {
       equipoId: persona.equipoId || "",
       celular: persona.celular || "",
       correo: persona.correo || "",
-      hijos: (hijos.get(persona.id) || []).map(nodo),
+      ramas: ramas.length,
+      hijos: ramas,
+    };
+  }
+  return (hijos.get(null) || []).map(nodo);
+}
+
+function arbolEquipos(equipos) {
+  const lista = equipos || [];
+  const ids = new Set(lista.map((item) => item.id));
+  const hijos = new Map();
+  lista.forEach((equipo) => {
+    const padre = equipo.padreId && ids.has(equipo.padreId) ? equipo.padreId : null;
+    if (!hijos.has(padre)) hijos.set(padre, []);
+    hijos.get(padre).push(equipo);
+  });
+  function nodo(equipo) {
+    const ramas = (hijos.get(equipo.id) || []).map(nodo);
+    return {
+      id: equipo.id,
+      nombre: equipo.nombre,
+      descripcion: equipo.descripcion || "",
+      ramas: ramas.length,
+      hijos: ramas,
     };
   }
   return (hijos.get(null) || []).map(nodo);
@@ -809,7 +869,7 @@ function arbol(personas) {
 
 async function organigrama() {
   const [personas, equipos] = await Promise.all([listarPersonas(), listarEquipos()]);
-  return { equipos, raices: arbol(personas) };
+  return { equipos, equiposArbol: arbolEquipos(equipos), raices: arbol(personas) };
 }
 
 module.exports = {

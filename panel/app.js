@@ -1192,27 +1192,49 @@ async function pintarPedidos() {
   vistaEl.append(alta, lista);
 }
 
-function pintarRama(nodo, equipos) {
+function textoRamas(cantidad) {
+  const n = Number(cantidad) || 0;
+  if (n === 1) return "1 rama";
+  if (n > 1) return n + " ramas";
+  return "Sin ramas";
+}
+
+function pintarRama(nodo, equipos, esEquipo, esRaiz) {
   const rama = document.createElement("div");
   rama.className = "org-rama";
+  if (!esRaiz) {
+    const punta = document.createElement("span");
+    punta.className = "org-punta";
+    punta.setAttribute("aria-hidden", "true");
+    rama.append(punta);
+  }
   const card = document.createElement("article");
-  card.className = "org-nodo";
+  card.className = "org-nodo" + (esEquipo ? " equipo" : "");
   const nombre = document.createElement("b");
   nombre.textContent = nodo.nombre;
+  card.append(nombre);
   const cargo = document.createElement("span");
-  cargo.textContent = nodo.cargo || "Sin cargo";
-  card.append(nombre, cargo);
-  const equipo = equipos.find((item) => item.id === nodo.equipoId);
-  if (equipo) {
-    const etiqueta = document.createElement("span");
-    etiqueta.textContent = equipo.nombre;
-    card.append(etiqueta);
+  cargo.className = "cargo";
+  cargo.textContent = esEquipo ? "Equipo" : nodo.cargo || "Sin cargo";
+  card.append(cargo);
+  if (!esEquipo) {
+    const equipo = (equipos || []).find((item) => item.id === nodo.equipoId);
+    if (equipo) {
+      const etiqueta = document.createElement("span");
+      etiqueta.className = "equipo-nombre";
+      etiqueta.textContent = equipo.nombre;
+      card.append(etiqueta);
+    }
+    const pie = document.createElement("p");
+    pie.className = "org-ramas";
+    pie.textContent = textoRamas(nodo.ramas != null ? nodo.ramas : (nodo.hijos || []).length);
+    card.append(pie);
   }
   rama.append(card);
   if (nodo.hijos && nodo.hijos.length) {
     const hijos = document.createElement("div");
     hijos.className = "org-hijos";
-    nodo.hijos.forEach((hijo) => hijos.append(pintarRama(hijo, equipos)));
+    nodo.hijos.forEach((hijo) => hijos.append(pintarRama(hijo, equipos, esEquipo, false)));
     rama.append(hijos);
   }
   return rama;
@@ -1230,17 +1252,35 @@ async function pintarEquipo() {
     caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
     const data = await api("/api/admin/organigrama");
     caja.innerHTML = "";
-    const card = tarjeta("Organigrama", "Sale solo de a quién reporta cada persona. Quien no reporta a nadie queda arriba.");
-    if (!data.raices.length) {
+    const card = tarjeta("Organigrama", "La flecha baja hacia cada rama. Un equipo puede colgar de otro. Abajo de cada persona está cuántas ramas salen de ella.");
+    const equiposArbol = data.equiposArbol || [];
+    if (!equiposArbol.length && !(data.raices || []).length) {
       const p = document.createElement("p");
       p.className = "ayuda";
-      p.textContent = "Agrega personas en Contactos y marca a quién reportan.";
+      p.textContent = "Agrega equipos y personas en Contactos. Marca de qué equipo cuelga cada equipo y a quién reporta cada persona.";
       card.append(p);
-    } else {
+    }
+    if (equiposArbol.length) {
+      const bloque = document.createElement("div");
+      bloque.className = "org-bloque";
+      const titulo = document.createElement("h3");
+      titulo.textContent = "EQUIPOS";
       const org = document.createElement("div");
       org.className = "org";
-      data.raices.forEach((raiz) => org.append(pintarRama(raiz, data.equipos || [])));
-      card.append(org);
+      equiposArbol.forEach((raiz) => org.append(pintarRama(raiz, data.equipos || [], true, true)));
+      bloque.append(titulo, org);
+      card.append(bloque);
+    }
+    if ((data.raices || []).length) {
+      const bloque = document.createElement("div");
+      bloque.className = "org-bloque";
+      const titulo = document.createElement("h3");
+      titulo.textContent = "PERSONAS";
+      const org = document.createElement("div");
+      org.className = "org";
+      data.raices.forEach((raiz) => org.append(pintarRama(raiz, data.equipos || [], false, true)));
+      bloque.append(titulo, org);
+      card.append(bloque);
     }
     caja.append(card);
     return;
@@ -1248,11 +1288,16 @@ async function pintarEquipo() {
   caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
   const [equipos, personas] = await Promise.all([api("/api/admin/equipos"), api("/api/admin/personas")]);
   caja.innerHTML = "";
-  const equiposCard = tarjeta("Equipos", "Grupos internos. Una persona puede quedar sin equipo.");
-  const equipoNuevo = { nombre: "", descripcion: "" };
+  const equiposCard = tarjeta("Equipos", "Un equipo puede colgar de otro. Quien no cuelga de nadie queda arriba del organigrama.");
+  const equipoNuevo = { nombre: "", descripcion: "", padreId: "" };
+  const padreLabel = document.createElement("label");
+  padreLabel.className = "campo";
+  padreLabel.append(Object.assign(document.createElement("span"), { textContent: "Cuelga de" }));
+  padreLabel.append(selectDe([{ id: "", nombre: "De nadie, queda arriba" }].concat(equipos.map((item) => ({ id: item.id, nombre: item.nombre }))), "", (v) => (equipoNuevo.padreId = v)));
   equiposCard.append(
     campo("Nombre", "", (v) => (equipoNuevo.nombre = v)),
     campo("Para qué es", "", (v) => (equipoNuevo.descripcion = v)),
+    padreLabel,
   );
   const addEquipo = document.createElement("button");
   addEquipo.type = "button";
@@ -1284,7 +1329,11 @@ async function pintarEquipo() {
       await api("/api/admin/equipos/" + encodeURIComponent(equipo.id), { method: "DELETE" });
       pintar();
     };
-    fila.append(nombre, borrar);
+    const padre = equipos.find((item) => item.id === equipo.padreId);
+    const meta = document.createElement("span");
+    meta.className = "ayuda";
+    meta.textContent = padre ? "cuelga de " + padre.nombre : "arriba";
+    fila.append(nombre, meta, borrar);
     if (equipo.descripcion) {
       const ayuda = document.createElement("span");
       ayuda.className = "ayuda";
