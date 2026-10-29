@@ -3,6 +3,7 @@ const path = require("path");
 const express = require("express");
 const multer = require("multer");
 const contenido = require("./bot/contenido");
+const operacion = require("./bot/operacion");
 const qrWeb = require("./bot/qr-web");
 
 const intentosClave = new Map();
@@ -261,6 +262,99 @@ function iniciar(puerto, extras = {}) {
   panel.delete("/cotizaciones/:id", manejar(async (req, res) => {
     await contenido.borrarCotizacion(req.params.id);
     res.json({ ok: true });
+  }));
+
+  panel.get("/estados", manejar(async (req, res) => {
+    const ambito = req.query.ambito === "pedido" || req.query.ambito === "cliente" ? req.query.ambito : undefined;
+    res.json(await operacion.listarEstados(ambito));
+  }));
+
+  panel.post("/estados", manejar(async (req, res) => {
+    res.json(await operacion.guardarEstado(req.body || {}));
+  }));
+
+  panel.post("/estados/:id/mover", manejar(async (req, res) => {
+    const lista = await operacion.moverEstado(req.params.id, Number(req.body && req.body.delta) || 0);
+    if (!lista) return res.status(404).json({ error: "No está ese estado" });
+    res.json(lista);
+  }));
+
+  panel.delete("/estados/:id", manejar(async (req, res) => {
+    await operacion.borrarEstado(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/clientes", manejar(async (req, res) => {
+    const [clientes, cotas] = await Promise.all([operacion.listarClientes(), contenido.listarCotizaciones()]);
+    const por = {};
+    cotas.forEach((item) => {
+      if (!item.clienteId) return;
+      if (!por[item.clienteId]) por[item.clienteId] = [];
+      por[item.clienteId].push(item);
+    });
+    res.json(clientes.map((item) => ({ ...item, solicitudes: por[item.id] || [] })));
+  }));
+
+  panel.post("/clientes", manejar(async (req, res) => {
+    const cuerpo = req.body || {};
+    res.json(await operacion.anotarCliente({ ...cuerpo, origen: cuerpo.origen || "panel", forzarEstado: Boolean(cuerpo.estadoId) }));
+  }));
+
+  panel.patch("/clientes/:id", manejar(async (req, res) => {
+    const cuerpo = req.body || {};
+    const actual = await operacion.actualizarCliente(req.params.id, cuerpo);
+    if (!actual) return res.status(404).json({ error: "No está ese cliente" });
+    if (cuerpo.estadoId) await contenido.propagarEstadoCliente(actual.id, actual.estadoId);
+    res.json(actual);
+  }));
+
+  panel.delete("/clientes/:id", manejar(async (req, res) => {
+    await operacion.borrarCliente(req.params.id);
+    await contenido.borrarCotizacionesDeCliente(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/pedidos", manejar(async (_req, res) => {
+    res.json(await operacion.listarPedidos());
+  }));
+
+  panel.post("/pedidos", manejar(async (req, res) => {
+    res.json(await operacion.guardarPedido(req.body || {}));
+  }));
+
+  panel.delete("/pedidos/:id", manejar(async (req, res) => {
+    await operacion.borrarPedido(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/equipos", manejar(async (_req, res) => {
+    res.json(await operacion.listarEquipos());
+  }));
+
+  panel.post("/equipos", manejar(async (req, res) => {
+    res.json(await operacion.guardarEquipo(req.body || {}));
+  }));
+
+  panel.delete("/equipos/:id", manejar(async (req, res) => {
+    await operacion.borrarEquipo(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/personas", manejar(async (_req, res) => {
+    res.json(await operacion.listarPersonas());
+  }));
+
+  panel.post("/personas", manejar(async (req, res) => {
+    res.json(await operacion.guardarPersona(req.body || {}));
+  }));
+
+  panel.delete("/personas/:id", manejar(async (req, res) => {
+    await operacion.borrarPersona(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/organigrama", manejar(async (_req, res) => {
+    res.json(await operacion.organigrama());
   }));
 
   panel.get("/pausas", manejar(async (_req, res) => {

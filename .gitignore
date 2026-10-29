@@ -3,6 +3,7 @@ node_modules
 media
 datos/cotizaciones.json
 datos/pausas.json
+datos/operacion.json
 data
 *.log
 CHATBOT 7SEVEND

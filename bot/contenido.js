@@ -1,5 +1,7 @@
 const fs = require("fs");
 const path = require("path");
+const { clienteSupabase, usaSupabase } = require("./nube");
+const operacion = require("./operacion");
 
 try {
   require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
@@ -26,29 +28,11 @@ const ESTILO_CLAVES = [
   "textoOscuroSuave",
 ];
 
-let sb = null;
 let cacheSitio = null;
 let cachePausas = [];
 let cachePausasEn = 0;
 let avisador = null;
 let resolverJids = null;
-
-function clienteSupabase() {
-  if (sb !== null) return sb || null;
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
-  if (!url || !key) {
-    sb = false;
-    return null;
-  }
-  const { createClient } = require("@supabase/supabase-js");
-  sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  return sb;
-}
-
-function usaSupabase() {
-  return Boolean(clienteSupabase());
-}
 
 function leerJson(archivo, fallback) {
   try {
@@ -181,6 +165,13 @@ function normalizarSitio(data) {
       imagen: urlSegura(item && item.imagen),
       palabras: listaTextos(item && item.palabras, 12, 32),
       preguntas: listaTextos(item && item.preguntas, 6, 200),
+      detalles: (Array.isArray(item && item.detalles) ? item.detalles : [])
+        .slice(0, 12)
+        .map((detalle) => ({
+          titulo: recorte(detalle && detalle.titulo, 60),
+          texto: recorte(detalle && detalle.texto, 400),
+        }))
+        .filter((detalle) => detalle.titulo || detalle.texto),
     };
   });
 
@@ -298,6 +289,88 @@ function getSitio() {
   return cacheSitio;
 }
 
+async function leerOfertas(client) {
+  const { data, error } = await client.from("ofertas").select("*").order("orden", { ascending: true });
+  if (error) return null;
+  if (!data || !data.length) return [];
+  const ids = data.map((row) => row.id);
+  const det = await client.from("oferta_detalles").select("*").in("oferta_id", ids).order("orden");
+  if (det.error) return null;
+  const detalles = det.data || [];
+  const de = (id, clase) => detalles.filter((item) => item.oferta_id === id && item.clase === clase).sort((a, b) => a.orden - b.orden);
+  return data.map((row) => ({
+    id: row.id,
+    activo: row.activo !== false,
+    tipo: row.tipo === "producto" ? "producto" : "servicio",
+    icono: row.icono,
+    nombre: row.nombre,
+    resumen: row.resumen,
+    tono: row.tono,
+    imagen: row.imagen,
+    palabras: de(row.id, "palabra").map((item) => item.texto),
+    preguntas: de(row.id, "pregunta").map((item) => item.texto),
+    detalles: de(row.id, "detalle").map((item) => ({ titulo: item.titulo || "", texto: item.texto || "" })),
+  }));
+}
+
+async function guardarOfertas(client, servicios) {
+  const probe = await client.from("ofertas").select("id").limit(1);
+  if (probe.error) return false;
+  const ids = servicios.map((item) => item.id);
+  const { data: actuales } = await client.from("ofertas").select("id");
+  const sobran = (actuales || []).map((row) => row.id).filter((id) => !ids.includes(id));
+  if (sobran.length) {
+    const borradas = await client.from("ofertas").delete().in("id", sobran);
+    if (borradas.error) throw new Error(borradas.error.message);
+  }
+  if (!servicios.length) return true;
+  const filas = servicios.map((item, orden) => ({
+    id: item.id,
+    tipo: item.tipo === "producto" ? "producto" : "servicio",
+    activo: item.activo !== false,
+    orden,
+    icono: item.icono || "</>",
+    nombre: item.nombre,
+    resumen: item.resumen || "",
+    tono: item.tono || "lila",
+    imagen: item.imagen || "",
+    updated_at: new Date().toISOString(),
+  }));
+  const { error } = await client.from("ofertas").upsert(filas);
+  if (error) throw new Error(error.message);
+  const detalles = [];
+  servicios.forEach((item) => {
+    (item.palabras || []).forEach((texto, orden) => detalles.push({ id: item.id + ":palabra:" + orden, oferta_id: item.id, clase: "palabra", orden, titulo: "", texto }));
+    (item.preguntas || []).forEach((texto, orden) => detalles.push({ id: item.id + ":pregunta:" + orden, oferta_id: item.id, clase: "pregunta", orden, titulo: "", texto }));
+    (item.detalles || []).forEach((detalle, orden) => detalles.push({
+      id: item.id + ":detalle:" + orden,
+      oferta_id: item.id,
+      clase: "detalle",
+      orden,
+      titulo: detalle.titulo || "",
+      texto: detalle.texto || "",
+    }));
+  });
+  const limpia = await client.from("oferta_detalles").delete().in("oferta_id", ids);
+  if (limpia.error) throw new Error(limpia.error.message);
+  if (detalles.length) {
+    const ins = await client.from("oferta_detalles").insert(detalles);
+    if (ins.error) throw new Error(ins.error.message);
+  }
+  return true;
+}
+
+async function conOfertas(client, sitio) {
+  const ofertas = await leerOfertas(client);
+  if (ofertas === null) return sitio;
+  if (!ofertas.length && sitio.servicios.length) {
+    await guardarOfertas(client, sitio.servicios);
+    return sitio;
+  }
+  if (ofertas.length) return normalizarSitio({ ...sitio, servicios: ofertas });
+  return sitio;
+}
+
 async function cargarSitio() {
   const local = normalizarSitio(baseSitio());
   const client = clienteSupabase();
@@ -311,17 +384,22 @@ async function cargarSitio() {
     cacheSitio = local;
     return cacheSitio;
   }
-  if (data && data.data) {
-    cacheSitio = normalizarSitio(data.data);
-    return cacheSitio;
+  let sitio = data && data.data ? normalizarSitio(data.data) : local;
+  if (!data || !data.data) {
+    const { error: up } = await client.from("contenido").upsert({
+      id: "sitio",
+      data: local,
+      updated_at: new Date().toISOString(),
+    });
+    if (up) console.error("Supabase sitio inicial:", up.message);
+    sitio = local;
   }
-  const { error: up } = await client.from("contenido").upsert({
-    id: "sitio",
-    data: local,
-    updated_at: new Date().toISOString(),
-  });
-  if (up) console.error("Supabase sitio inicial:", up.message);
-  cacheSitio = local;
+  try {
+    sitio = await conOfertas(client, sitio);
+  } catch (errorOfertas) {
+    console.error("Supabase ofertas:", errorOfertas.message);
+  }
+  cacheSitio = sitio;
   return cacheSitio;
 }
 
@@ -336,6 +414,7 @@ async function guardarSitio(data) {
       updated_at: new Date().toISOString(),
     });
     if (error) throw new Error(error.message);
+    await guardarOfertas(client, limpio.servicios);
   } else {
     escribirJson(archivoSitio, limpio);
   }
@@ -388,22 +467,80 @@ function leerCotasLocal() {
   return Array.isArray(data) ? data : [];
 }
 
+function presentarCota(row, respuestas) {
+  return {
+    id: row.id,
+    clienteId: row.clienteId || "",
+    origen: row.origen || "pagina",
+    servicioId: row.servicioId || "",
+    servicioNombre: row.servicioNombre || "",
+    nombre: row.nombre || "",
+    negocio: row.negocio || "",
+    celular: row.celular || "",
+    jid: row.jid || "",
+    mensaje: row.mensaje || "",
+    respuestas: respuestas || row.respuestas || [],
+    estado: row.estado || "cli-nueva",
+    notaInterna: row.notaInterna || "",
+    creadoEn: row.creadoEn,
+  };
+}
+
 async function listarCotizaciones() {
   const client = clienteSupabase();
-  if (client) {
+  if (client && (await operacion.tablasNuevas())) {
     const { data, error } = await client
       .from("cotizaciones")
-      .select("id, data, creado_en")
+      .select("id, cliente_id, oferta_id, oferta_nombre, origen, estado_id, mensaje, nota_interna, nombre, negocio, celular, jid, creado_en")
       .order("creado_en", { ascending: false })
       .limit(200);
     if (error) throw new Error(error.message);
-    return (data || []).map((row) => ({
-      ...(row.data || {}),
-      id: row.id,
-      creadoEn: (row.data && row.data.creadoEn) || row.creado_en,
-    }));
+    const ids = (data || []).map((row) => row.id);
+    const dets = await operacion.respuestasDe(ids);
+    const clientes = await operacion.listarClientes();
+    const porCliente = new Map(clientes.map((item) => [item.id, item]));
+    return (data || []).map((row) => {
+      const persona = porCliente.get(row.cliente_id);
+      return presentarCota(
+        {
+          id: row.id,
+          clienteId: row.cliente_id,
+          origen: row.origen,
+          servicioId: row.oferta_id || "",
+          servicioNombre: row.oferta_nombre || "",
+          nombre: row.nombre,
+          negocio: row.negocio,
+          celular: row.celular,
+          jid: row.jid,
+          mensaje: row.mensaje,
+          estado: (persona && persona.estadoId) || row.estado_id,
+          notaInterna: row.nota_interna || "",
+          creadoEn: row.creado_en,
+        },
+        dets
+          .filter((item) => (item.cotizacion_id || item.cotizacionId) === row.id)
+          .map((item) => ({ pregunta: item.titulo || "", respuesta: item.texto || "" })),
+      );
+    });
   }
-  return leerCotasLocal().sort((a, b) => String(b.creadoEn).localeCompare(String(a.creadoEn)));
+  if (client) {
+    const { data, error } = await client.from("cotizaciones").select("id, data, creado_en").order("creado_en", { ascending: false }).limit(200);
+    if (error) throw new Error(error.message);
+    return (data || []).map((row) => presentarCota({ ...(row.data || {}), id: row.id, creadoEn: (row.data && row.data.creadoEn) || row.creado_en }));
+  }
+  const lista = leerCotasLocal();
+  let cambio = false;
+  for (const item of lista) {
+    if (item.clienteId) continue;
+    const persona = await operacion.anotarCliente({ ...item, cotizacionId: item.id, estado: item.estado });
+    item.clienteId = persona.id;
+    item.estado = persona.estadoId || item.estado;
+    cambio = true;
+  }
+  if (cambio) escribirJson(archivoCotas, lista);
+  return lista
+    .map((item) => presentarCota(item))
+    .sort((a, b) => String(b.creadoEn).localeCompare(String(a.creadoEn)));
 }
 
 async function guardarCotizacion(entrada) {
@@ -411,25 +548,68 @@ async function guardarCotizacion(entrada) {
   const servicio = (sitio.servicios || []).find((item) => item.id === entrada.servicioId);
   const cota = {
     id: entrada.id || nuevoId(),
-    origen: entrada.origen === "whatsapp" ? "whatsapp" : "pagina",
+    origen: entrada.origen === "whatsapp" ? "whatsapp" : entrada.origen === "panel" ? "panel" : "pagina",
     servicioId: recorte(entrada.servicioId, 40),
     servicioNombre: recorte(entrada.servicioNombre || (servicio && servicio.nombre) || "", 80),
     nombre: recorte(entrada.nombre, 80),
     negocio: recorte(entrada.negocio, 80),
     celular: recorte(entrada.celular, 20).replace(/[^\d]/g, ""),
+    correo: recorte(entrada.correo, 80),
     jid: recorte(entrada.jid, 80),
     mensaje: recorte(entrada.mensaje, 800),
     respuestas: (Array.isArray(entrada.respuestas) ? entrada.respuestas : []).slice(0, 8).map((item) => ({
       pregunta: recorte(item && item.pregunta, 200),
       respuesta: recorte(item && item.respuesta, 500),
     })),
-    estado: ["nueva", "en_curso", "lista", "descartada"].includes(entrada.estado) ? entrada.estado : "nueva",
+    estado: entrada.estado || entrada.estadoId || "nueva",
     notaInterna: recorte(entrada.notaInterna, 500),
     creadoEn: entrada.creadoEn || new Date().toISOString(),
+    clienteId: entrada.clienteId || "",
   };
   if (!cota.nombre) throw new Error("Falta el nombre");
+  const persona = await operacion.anotarCliente({
+    id: cota.clienteId,
+    nombre: cota.nombre,
+    negocio: cota.negocio,
+    celular: cota.celular,
+    correo: cota.correo,
+    jid: cota.jid,
+    origen: cota.origen,
+    estado: cota.estado,
+    estadoId: entrada.forzarEstado ? cota.estado : "",
+    forzarEstado: Boolean(entrada.forzarEstado),
+    ...(entrada.notaInterna != null ? { nota: cota.notaInterna } : {}),
+    cotizacionId: cota.id,
+    respuestas: cota.respuestas,
+  });
+  cota.clienteId = persona.id;
+  cota.estado = persona.estadoId || cota.estado;
   const client = clienteSupabase();
-  if (client) {
+  if (client && (await operacion.tablasNuevas())) {
+    const fila = {
+      id: cota.id,
+      cliente_id: cota.clienteId,
+      oferta_id: cota.servicioId || null,
+      oferta_nombre: cota.servicioNombre,
+      origen: cota.origen,
+      estado_id: cota.estado,
+      mensaje: cota.mensaje,
+      nota_interna: cota.notaInterna,
+      nombre: cota.nombre,
+      negocio: cota.negocio,
+      celular: cota.celular,
+      jid: cota.jid,
+      creado_en: cota.creadoEn,
+    };
+    let { error } = await client.from("cotizaciones").upsert(fila);
+    if (error && /23503|foreign key/i.test(error.message || "")) {
+      fila.oferta_id = null;
+      const retry = await client.from("cotizaciones").upsert(fila);
+      error = retry.error;
+    }
+    if (error) throw new Error(error.message);
+    if (entrada.forzarEstado) await propagarEstadoCliente(cota.clienteId, cota.estado);
+  } else if (client) {
     const { error } = await client.from("cotizaciones").upsert({
       id: cota.id,
       data: cota,
@@ -440,20 +620,35 @@ async function guardarCotizacion(entrada) {
     const lista = leerCotasLocal().filter((item) => item.id !== cota.id);
     lista.push(cota);
     escribirJson(archivoCotas, lista);
+    if (entrada.forzarEstado) await propagarEstadoCliente(cota.clienteId, cota.estado);
   }
   return cota;
+}
+
+async function propagarEstadoCliente(clienteId, estadoId) {
+  if (!clienteId || !estadoId) return;
+  const client = clienteSupabase();
+  if (client && (await operacion.tablasNuevas())) {
+    const { error } = await client.from("cotizaciones").update({ estado_id: estadoId }).eq("cliente_id", clienteId);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  if (client) return;
+  const lista = leerCotasLocal().map((item) => (item.clienteId === clienteId ? { ...item, estado: estadoId } : item));
+  escribirJson(archivoCotas, lista);
 }
 
 async function actualizarCotizacion(id, cambios) {
   const lista = await listarCotizaciones();
   const actual = lista.find((item) => item.id === id);
   if (!actual) return null;
-  const siguiente = {
+  const estado = cambios.estado || cambios.estadoId || actual.estado;
+  return guardarCotizacion({
     ...actual,
-    estado: ["nueva", "en_curso", "lista", "descartada"].includes(cambios.estado) ? cambios.estado : actual.estado,
+    estado,
+    forzarEstado: cambios.estado != null || cambios.estadoId != null,
     notaInterna: cambios.notaInterna != null ? recorte(cambios.notaInterna, 500) : actual.notaInterna,
-  };
-  return guardarCotizacion(siguiente);
+  });
 }
 
 async function borrarCotizacion(id) {
@@ -468,6 +663,13 @@ async function borrarCotizacion(id) {
   if (siguiente.length === lista.length) return false;
   escribirJson(archivoCotas, siguiente);
   return true;
+}
+
+async function borrarCotizacionesDeCliente(clienteId) {
+  const client = clienteSupabase();
+  if (client) return;
+  const lista = leerCotasLocal().filter((item) => item.clienteId !== clienteId);
+  escribirJson(archivoCotas, lista);
 }
 
 function clavePausa(valor) {
@@ -682,6 +884,8 @@ module.exports = {
   guardarCotizacion,
   actualizarCotizacion,
   borrarCotizacion,
+  borrarCotizacionesDeCliente,
+  propagarEstadoCliente,
   listarPausas,
   pausarChat,
   reactivarChat,

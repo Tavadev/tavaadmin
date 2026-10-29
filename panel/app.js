@@ -1,7 +1,10 @@
 let sitio = null;
 let vista = "resumen";
 let chatParte = "clientes";
+let clientesParte = "fichas";
+let equipoParte = "personas";
 let servicioId = null;
+let pedidoDesde = "";
 let reloj = null;
 
 const vistaEl = document.getElementById("vista");
@@ -11,6 +14,9 @@ const TITULOS = {
   resumen: ["HOY", "Resumen"],
   pagina: ["LA PÁGINA", "Textos que ve la gente"],
   apariencia: ["ESTILO", "Colores e imágenes"],
+  clientes: ["CLIENTES", "Estados y fichas"],
+  pedidos: ["PEDIDOS", "Trabajos con cada cliente"],
+  equipo: ["EQUIPO", "Contactos y organigrama"],
 };
 const TITULOS_CHAT = {
   clientes: ["CHATBOT", "Seguimiento de clientes"],
@@ -148,7 +154,10 @@ function pintarNav() {
   document.querySelectorAll("[data-nav]").forEach((btn) => {
     btn.classList.toggle("activa", btn.dataset.nav === vista);
   });
-  const [etiqueta, titulo] = vista === "chatbot" ? TITULOS_CHAT[chatParte] : TITULOS[vista];
+  const tituloClientes = clientesParte === "estados" ? ["CLIENTES", "Estados del recorrido"] : TITULOS.clientes;
+  const tituloEquipo = equipoParte === "organigrama" ? ["EQUIPO", "Organigrama"] : TITULOS.equipo;
+  const mapa = vista === "chatbot" ? TITULOS_CHAT[chatParte] : vista === "clientes" ? tituloClientes : vista === "equipo" ? tituloEquipo : TITULOS[vista];
+  const [etiqueta, titulo] = mapa;
   document.getElementById("etiqueta").textContent = etiqueta;
   document.getElementById("titulo").textContent = titulo;
   const edita = vista === "pagina" || vista === "apariencia" || (vista === "chatbot" && (chatParte === "registro" || chatParte === "mensajes"));
@@ -157,14 +166,20 @@ function pintarNav() {
 
 async function pintarResumen() {
   vistaEl.innerHTML = "<p class='ayuda'>Cargando…</p>";
-  const [estado, cotas] = await Promise.all([api("/api/admin/estado"), api("/api/admin/cotizaciones")]);
+  const [estado, cotas, pedidos] = await Promise.all([
+    api("/api/admin/estado"),
+    api("/api/admin/cotizaciones"),
+    api("/api/admin/pedidos").catch(() => []),
+  ]);
   vistaEl.innerHTML = "";
   const nums = document.createElement("div");
   nums.className = "metricas";
-  const nuevas = cotas.filter((item) => item.estado === "nueva").length;
+  const nuevas = cotas.filter((item) => item.estado === "nueva" || item.estado === "cli-nueva").length;
+  const abiertos = pedidos.filter((item) => item.estadoId !== "ped-entregado" && item.estadoId !== "ped-cancelado").length;
   const bloques = [
     ["Clientes", cotas.length],
     ["Sin revisar", nuevas],
+    ["Pedidos abiertos", abiertos],
     ["WhatsApp", estado.whatsapp && estado.whatsapp.titulo],
   ];
   for (const [nombre, valor] of bloques) {
@@ -322,6 +337,7 @@ function pintarServicios(nodo) {
       imagen: "",
       palabras: [],
       preguntas: ["¿Qué necesitas?"],
+      detalles: [],
     });
     servicioId = id;
     pintar();
@@ -379,6 +395,36 @@ function pintarServicios(nodo) {
         actual.palabras = v.split(",").map((parte) => parte.trim()).filter(Boolean);
       }),
     );
+    const detTitulo = document.createElement("h2");
+    detTitulo.textContent = "Detalles";
+    editor.append(detTitulo);
+    if (!Array.isArray(actual.detalles)) actual.detalles = [];
+    actual.detalles.forEach((detalle, i) => {
+      const fila = document.createElement("div");
+      fila.className = "rejilla";
+      fila.append(
+        campo("Título", detalle.titulo, (v) => (actual.detalles[i].titulo = v)),
+        campo("Texto", detalle.texto, (v) => (actual.detalles[i].texto = v)),
+      );
+      const quitar = document.createElement("button");
+      quitar.type = "button";
+      quitar.className = "suave";
+      quitar.textContent = "Quitar detalle";
+      quitar.onclick = () => {
+        actual.detalles.splice(i, 1);
+        pintar();
+      };
+      editor.append(fila, quitar);
+    });
+    const addDet = document.createElement("button");
+    addDet.type = "button";
+    addDet.className = "suave";
+    addDet.textContent = "Agregar detalle";
+    addDet.onclick = () => {
+      actual.detalles.push({ titulo: "", texto: "" });
+      pintar();
+    };
+    editor.append(addDet);
     const pregTitulo = document.createElement("h2");
     pregTitulo.textContent = "Preguntas del bot";
     editor.append(pregTitulo);
@@ -547,7 +593,16 @@ function pintarBot(nodo) {
 async function pintarCotizaciones(nodo) {
   const caja = nodo || vistaEl;
   caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
-  const [cotas, pausas] = await Promise.all([api("/api/admin/cotizaciones"), api("/api/admin/pausas")]);
+  const [cotas, pausas, estados] = await Promise.all([
+    api("/api/admin/cotizaciones"),
+    api("/api/admin/pausas"),
+    api("/api/admin/estados?ambito=cliente").catch(() => [
+      { id: "nueva", nombre: "Nueva" },
+      { id: "en_curso", nombre: "En conversación" },
+      { id: "lista", nombre: "Lista" },
+      { id: "descartada", nombre: "Descartada" },
+    ]),
+  ]);
   caja.innerHTML = "";
   const card = tarjeta("Clientes", "Aquí queda quien escribió por la página o por WhatsApp. Cambia el estado según cómo vaya la conversación.");
   if (!cotas.length) {
@@ -578,11 +633,11 @@ async function pintarCotizaciones(nodo) {
       cuerpo.append(p);
     }
     const estado = document.createElement("select");
-    [["nueva", "Nueva"], ["en_curso", "En conversación"], ["lista", "Lista"], ["descartada", "Descartada"]].forEach(([valor, nombre]) => {
+    estados.forEach((opcion) => {
       const op = document.createElement("option");
-      op.value = valor;
-      op.textContent = nombre;
-      if (item.estado === valor) op.selected = true;
+      op.value = opcion.id;
+      op.textContent = opcion.nombre;
+      if (item.estado === opcion.id) op.selected = true;
       estado.append(op);
     });
     estado.onchange = async () => {
@@ -732,6 +787,574 @@ async function pintarChatbot() {
   return pintarBot(caja);
 }
 
+function subnav(opciones, actual, alElegir) {
+  const barra = document.createElement("div");
+  barra.className = "fila subnav";
+  opciones.forEach(([id, nombre]) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "suave" + (actual === id ? " activa" : "");
+    btn.textContent = nombre;
+    btn.onclick = () => alElegir(id);
+    barra.append(btn);
+  });
+  return barra;
+}
+
+function selectDe(opciones, valor, alCambiar) {
+  const select = document.createElement("select");
+  opciones.forEach((opcion) => {
+    const op = document.createElement("option");
+    op.value = opcion.id;
+    op.textContent = opcion.nombre;
+    if (opcion.id === valor) op.selected = true;
+    select.append(op);
+  });
+  select.onchange = () => alCambiar(select.value);
+  return select;
+}
+
+async function pintarClientes() {
+  vistaEl.innerHTML = "";
+  vistaEl.append(subnav([["fichas", "Fichas"], ["estados", "Estados"]], clientesParte, (id) => {
+    clientesParte = id;
+    ir("clientes");
+  }));
+  const caja = document.createElement("div");
+  vistaEl.append(caja);
+  if (clientesParte === "estados") return pintarEstados(caja, "cliente");
+  caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
+  const [clientes, estados] = await Promise.all([
+    api("/api/admin/clientes"),
+    api("/api/admin/estados?ambito=cliente"),
+  ]);
+  caja.innerHTML = "";
+  const alta = tarjeta("Nuevo cliente", "También entran solos cuando escriben por la página o por WhatsApp.");
+  const borrador = { nombre: "", negocio: "", celular: "", correo: "", estadoId: (estados[0] && estados[0].id) || "" };
+  const red = document.createElement("div");
+  red.className = "rejilla";
+  red.append(
+    campo("Nombre", "", (v) => (borrador.nombre = v)),
+    campo("Negocio", "", (v) => (borrador.negocio = v)),
+    campo("Celular", "", (v) => (borrador.celular = v)),
+    campo("Correo", "", (v) => (borrador.correo = v)),
+  );
+  const crear = document.createElement("button");
+  crear.type = "button";
+  crear.className = "primario";
+  crear.textContent = "Agregar cliente";
+  crear.onclick = async () => {
+    try {
+      await api("/api/admin/clientes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(borrador),
+      });
+      toast("Cliente agregado");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  alta.append(red, crear);
+  caja.append(alta);
+  const lista = tarjeta("Fichas", "Cada persona tiene un estado. Puedes agregar los que faltan en Estados.");
+  if (!clientes.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Todavía no hay clientes.";
+    lista.append(p);
+  }
+  clientes.forEach((item) => {
+    const bloque = document.createElement("article");
+    bloque.className = "cota";
+    const cabeza = document.createElement("p");
+    cabeza.innerHTML = `<strong>${esc(item.nombre)}</strong>`;
+    const ficha = { ...item, detalles: (item.detalles || []).map((detalle) => ({ ...detalle })) };
+    const redFicha = document.createElement("div");
+    redFicha.className = "rejilla";
+    redFicha.append(
+      campo("Nombre", ficha.nombre, (v) => (ficha.nombre = v)),
+      campo("Negocio", ficha.negocio, (v) => (ficha.negocio = v)),
+      campo("Celular", ficha.celular, (v) => (ficha.celular = v)),
+      campo("Correo", ficha.correo, (v) => (ficha.correo = v)),
+    );
+    const estadoLabel = document.createElement("label");
+    estadoLabel.className = "campo";
+    estadoLabel.append(Object.assign(document.createElement("span"), { textContent: "Estado" }));
+    estadoLabel.append(selectDe(estados, ficha.estadoId, (v) => (ficha.estadoId = v)));
+    if (item.solicitudes && item.solicitudes.length) {
+      item.solicitudes.forEach((sol) => {
+        const p = document.createElement("p");
+        p.className = "ayuda";
+        p.textContent = [sol.servicioNombre || "Solicitud", sol.origen === "whatsapp" ? "WhatsApp" : "Página", (sol.mensaje || "").slice(0, 140)]
+          .filter(Boolean)
+          .join(" · ");
+        bloque.append(p);
+      });
+    }
+    const detTitulo = document.createElement("p");
+    detTitulo.textContent = "Detalles";
+    const detCaja = document.createElement("div");
+    const pintarDets = () => {
+      detCaja.innerHTML = "";
+      ficha.detalles.forEach((detalle, i) => {
+        const fila = document.createElement("div");
+        fila.className = "rejilla";
+        fila.append(
+          campo("Título", detalle.titulo, (v) => (ficha.detalles[i].titulo = v)),
+          campo("Texto", detalle.texto, (v) => (ficha.detalles[i].texto = v)),
+        );
+        detCaja.append(fila);
+      });
+    };
+    pintarDets();
+    const addDet = document.createElement("button");
+    addDet.type = "button";
+    addDet.className = "suave";
+    addDet.textContent = "Agregar detalle";
+    addDet.onclick = () => {
+      ficha.detalles.push({ titulo: "", texto: "" });
+      pintarDets();
+    };
+    const nota = document.createElement("textarea");
+    nota.placeholder = "Nota interna. La persona no la ve.";
+    nota.value = ficha.nota || "";
+    nota.addEventListener("input", () => (ficha.nota = nota.value));
+    const acciones = document.createElement("div");
+    acciones.className = "fila";
+    const guardarFicha = document.createElement("button");
+    guardarFicha.type = "button";
+    guardarFicha.className = "primario";
+    guardarFicha.textContent = "Guardar ficha";
+    guardarFicha.onclick = async () => {
+      try {
+        await api("/api/admin/clientes/" + encodeURIComponent(item.id), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ficha),
+        });
+        toast("Ficha guardada");
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    const pedido = document.createElement("button");
+    pedido.type = "button";
+    pedido.className = "suave";
+    pedido.textContent = "Hacer pedido";
+    pedido.onclick = () => {
+      pedidoDesde = item.id;
+      ir("pedidos");
+    };
+    const borrar = document.createElement("button");
+    borrar.type = "button";
+    borrar.className = "peligro";
+    borrar.textContent = "Eliminar";
+    borrar.onclick = async () => {
+      if (!confirm("¿Quitar a esta persona, sus solicitudes y sus pedidos?")) return;
+      await api("/api/admin/clientes/" + encodeURIComponent(item.id), { method: "DELETE" });
+      pintar();
+    };
+    acciones.append(guardarFicha, pedido, addDet, borrar);
+    bloque.prepend(cabeza);
+    bloque.append(redFicha, estadoLabel, detTitulo, detCaja, nota, acciones);
+    lista.append(bloque);
+  });
+  caja.append(lista);
+}
+
+async function pintarEstados(caja, ambito) {
+  caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
+  const estados = await api("/api/admin/estados?ambito=" + ambito);
+  caja.innerHTML = "";
+  const card = tarjeta(
+    ambito === "pedido" ? "Estados del pedido" : "Estados del cliente",
+    "Agrega los que uses. El primero es por donde entra una ficha nueva.",
+  );
+  estados.forEach((estado) => {
+    const fila = document.createElement("div");
+    fila.className = "fila";
+    const punto = document.createElement("i");
+    punto.className = "punto";
+    punto.style.background = estado.color || "#7B5FD1";
+    const nombre = document.createElement("strong");
+    nombre.textContent = estado.nombre;
+    const subir = document.createElement("button");
+    subir.type = "button";
+    subir.className = "suave";
+    subir.textContent = "Subir";
+    subir.onclick = async () => {
+      await api("/api/admin/estados/" + encodeURIComponent(estado.id) + "/mover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delta: -1 }),
+      });
+      pintar();
+    };
+    const bajar = document.createElement("button");
+    bajar.type = "button";
+    bajar.className = "suave";
+    bajar.textContent = "Bajar";
+    bajar.onclick = async () => {
+      await api("/api/admin/estados/" + encodeURIComponent(estado.id) + "/mover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delta: 1 }),
+      });
+      pintar();
+    };
+    const borrar = document.createElement("button");
+    borrar.type = "button";
+    borrar.className = "peligro";
+    borrar.textContent = "Quitar";
+    borrar.onclick = async () => {
+      try {
+        await api("/api/admin/estados/" + encodeURIComponent(estado.id), { method: "DELETE" });
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    fila.append(punto, nombre, subir, bajar, borrar);
+    card.append(fila);
+  });
+  const nuevo = { nombre: "", color: "#7B5FD1", ambito };
+  const red = document.createElement("div");
+  red.className = "rejilla";
+  red.append(
+    campo("Nombre del estado", "", (v) => (nuevo.nombre = v)),
+    campo("Color", nuevo.color, (v) => (nuevo.color = v), "color"),
+  );
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "primario";
+  add.textContent = "Agregar estado";
+  add.onclick = async () => {
+    try {
+      await api("/api/admin/estados", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nuevo),
+      });
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  card.append(red, add);
+  caja.append(card);
+}
+
+async function pintarPedidos() {
+  vistaEl.innerHTML = "<p class='ayuda'>Cargando…</p>";
+  const [pedidos, clientes, estados] = await Promise.all([
+    api("/api/admin/pedidos"),
+    api("/api/admin/clientes"),
+    api("/api/admin/estados?ambito=pedido"),
+  ]);
+  vistaEl.innerHTML = "";
+  vistaEl.append(subnav([["lista", "Pedidos"], ["estados", "Estados"]], "lista", (id) => {
+    if (id === "estados") {
+      vistaEl.innerHTML = "";
+      const caja = document.createElement("div");
+      vistaEl.append(subnav([["lista", "Pedidos"], ["estados", "Estados"]], "estados", (otro) => {
+        if (otro === "lista") pintar();
+      }));
+      vistaEl.append(caja);
+      pintarEstados(caja, "pedido").catch((error) => toast(error.message));
+    }
+  }));
+  const ofertas = (sitio && sitio.servicios) || [];
+  const borrador = {
+    clienteId: pedidoDesde || (clientes[0] && clientes[0].id) || "",
+    titulo: "",
+    estadoId: (estados.find((item) => item.esInicial) || estados[0] || {}).id || "",
+    nota: "",
+    items: [{ ofertaId: "", descripcion: "", cantidad: 1, detalle: "" }],
+  };
+  pedidoDesde = "";
+  const alta = tarjeta("Nuevo pedido", "Un pedido junta a un cliente con lo que hay que hacerle. Sin precio público.");
+  if (!clientes.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Primero agrega un cliente.";
+    alta.append(p);
+  } else {
+    const clienteLabel = document.createElement("label");
+    clienteLabel.className = "campo";
+    clienteLabel.append(Object.assign(document.createElement("span"), { textContent: "Cliente" }));
+    clienteLabel.append(selectDe(clientes.map((item) => ({ id: item.id, nombre: item.nombre })), borrador.clienteId, (v) => (borrador.clienteId = v)));
+    const estadoLabel = document.createElement("label");
+    estadoLabel.className = "campo";
+    estadoLabel.append(Object.assign(document.createElement("span"), { textContent: "Estado" }));
+    estadoLabel.append(selectDe(estados, borrador.estadoId, (v) => (borrador.estadoId = v)));
+    const lineas = document.createElement("div");
+    const pintarLineas = () => {
+      lineas.innerHTML = "";
+      borrador.items.forEach((linea, i) => {
+        const fila = document.createElement("div");
+        fila.className = "rejilla";
+        const oferta = document.createElement("label");
+        oferta.className = "campo";
+        oferta.append(Object.assign(document.createElement("span"), { textContent: "Producto o servicio" }));
+        oferta.append(selectDe([{ id: "", nombre: "Sin ficha" }].concat(ofertas.map((item) => ({ id: item.id, nombre: item.nombre }))), linea.ofertaId, (v) => {
+          borrador.items[i].ofertaId = v;
+          const elegida = ofertas.find((item) => item.id === v);
+          if (elegida && !borrador.items[i].descripcion) borrador.items[i].descripcion = elegida.nombre;
+        }));
+        fila.append(
+          oferta,
+          campo("Descripción", linea.descripcion, (v) => (borrador.items[i].descripcion = v)),
+          campo("Cantidad", String(linea.cantidad || 1), (v) => (borrador.items[i].cantidad = v)),
+          campo("Detalle", linea.detalle, (v) => (borrador.items[i].detalle = v)),
+        );
+        lineas.append(fila);
+      });
+    };
+    pintarLineas();
+    const addLinea = document.createElement("button");
+    addLinea.type = "button";
+    addLinea.className = "suave";
+    addLinea.textContent = "Agregar línea";
+    addLinea.onclick = () => {
+      borrador.items.push({ ofertaId: "", descripcion: "", cantidad: 1, detalle: "" });
+      pintarLineas();
+    };
+    const crear = document.createElement("button");
+    crear.type = "button";
+    crear.className = "primario";
+    crear.textContent = "Guardar pedido";
+    crear.onclick = async () => {
+      try {
+        await api("/api/admin/pedidos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...borrador,
+            titulo: borrador.titulo,
+          }),
+        });
+        toast("Pedido guardado");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    alta.append(
+      clienteLabel,
+      campo("Nombre del pedido", "", (v) => (borrador.titulo = v)),
+      estadoLabel,
+      campo("Nota", "", (v) => (borrador.nota = v), "area"),
+      lineas,
+      addLinea,
+      crear,
+    );
+  }
+  const lista = tarjeta("Pedidos");
+  if (!pedidos.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Todavía no hay pedidos.";
+    lista.append(p);
+  }
+  const porCliente = new Map(clientes.map((item) => [item.id, item.nombre]));
+  const porEstado = new Map(estados.map((item) => [item.id, item.nombre]));
+  pedidos.forEach((pedido) => {
+    const bloque = document.createElement("article");
+    bloque.className = "cota";
+    const cabeza = document.createElement("p");
+    cabeza.innerHTML = `<strong>${esc(pedido.titulo)}</strong> · ${esc(porCliente.get(pedido.clienteId) || "Cliente")} · ${esc(porEstado.get(pedido.estadoId) || "")}`;
+    bloque.append(cabeza);
+    (pedido.items || []).forEach((linea) => {
+      const p = document.createElement("p");
+      p.textContent = `${linea.cantidad} × ${linea.descripcion}${linea.detalle ? " · " + linea.detalle : ""}`;
+      bloque.append(p);
+    });
+    if (pedido.nota) {
+      const nota = document.createElement("p");
+      nota.className = "ayuda";
+      nota.textContent = pedido.nota;
+      bloque.append(nota);
+    }
+    const borrar = document.createElement("button");
+    borrar.type = "button";
+    borrar.className = "peligro";
+    borrar.textContent = "Eliminar";
+    borrar.onclick = async () => {
+      if (!confirm("¿Quitar este pedido?")) return;
+      await api("/api/admin/pedidos/" + encodeURIComponent(pedido.id), { method: "DELETE" });
+      pintar();
+    };
+    bloque.append(borrar);
+    lista.append(bloque);
+  });
+  vistaEl.append(alta, lista);
+}
+
+function pintarRama(nodo, equipos) {
+  const rama = document.createElement("div");
+  rama.className = "org-rama";
+  const card = document.createElement("article");
+  card.className = "org-nodo";
+  const nombre = document.createElement("b");
+  nombre.textContent = nodo.nombre;
+  const cargo = document.createElement("span");
+  cargo.textContent = nodo.cargo || "Sin cargo";
+  card.append(nombre, cargo);
+  const equipo = equipos.find((item) => item.id === nodo.equipoId);
+  if (equipo) {
+    const etiqueta = document.createElement("span");
+    etiqueta.textContent = equipo.nombre;
+    card.append(etiqueta);
+  }
+  rama.append(card);
+  if (nodo.hijos && nodo.hijos.length) {
+    const hijos = document.createElement("div");
+    hijos.className = "org-hijos";
+    nodo.hijos.forEach((hijo) => hijos.append(pintarRama(hijo, equipos)));
+    rama.append(hijos);
+  }
+  return rama;
+}
+
+async function pintarEquipo() {
+  vistaEl.innerHTML = "";
+  vistaEl.append(subnav([["personas", "Contactos"], ["organigrama", "Organigrama"]], equipoParte, (id) => {
+    equipoParte = id;
+    ir("equipo");
+  }));
+  const caja = document.createElement("div");
+  vistaEl.append(caja);
+  if (equipoParte === "organigrama") {
+    caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
+    const data = await api("/api/admin/organigrama");
+    caja.innerHTML = "";
+    const card = tarjeta("Organigrama", "Sale solo de a quién reporta cada persona. Quien no reporta a nadie queda arriba.");
+    if (!data.raices.length) {
+      const p = document.createElement("p");
+      p.className = "ayuda";
+      p.textContent = "Agrega personas en Contactos y marca a quién reportan.";
+      card.append(p);
+    } else {
+      const org = document.createElement("div");
+      org.className = "org";
+      data.raices.forEach((raiz) => org.append(pintarRama(raiz, data.equipos || [])));
+      card.append(org);
+    }
+    caja.append(card);
+    return;
+  }
+  caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
+  const [equipos, personas] = await Promise.all([api("/api/admin/equipos"), api("/api/admin/personas")]);
+  caja.innerHTML = "";
+  const equiposCard = tarjeta("Equipos", "Grupos internos. Una persona puede quedar sin equipo.");
+  const equipoNuevo = { nombre: "", descripcion: "" };
+  equiposCard.append(
+    campo("Nombre", "", (v) => (equipoNuevo.nombre = v)),
+    campo("Para qué es", "", (v) => (equipoNuevo.descripcion = v)),
+  );
+  const addEquipo = document.createElement("button");
+  addEquipo.type = "button";
+  addEquipo.className = "primario";
+  addEquipo.textContent = "Agregar equipo";
+  addEquipo.onclick = async () => {
+    try {
+      await api("/api/admin/equipos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(equipoNuevo),
+      });
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  equiposCard.append(addEquipo);
+  equipos.forEach((equipo) => {
+    const fila = document.createElement("div");
+    fila.className = "fila";
+    const nombre = document.createElement("strong");
+    nombre.textContent = equipo.nombre;
+    const borrar = document.createElement("button");
+    borrar.type = "button";
+    borrar.className = "suave";
+    borrar.textContent = "Quitar";
+    borrar.onclick = async () => {
+      await api("/api/admin/equipos/" + encodeURIComponent(equipo.id), { method: "DELETE" });
+      pintar();
+    };
+    fila.append(nombre, borrar);
+    if (equipo.descripcion) {
+      const ayuda = document.createElement("span");
+      ayuda.className = "ayuda";
+      ayuda.textContent = equipo.descripcion;
+      fila.append(ayuda);
+    }
+    equiposCard.append(fila);
+  });
+  const gente = tarjeta("Personas", "El cargo y a quién reportan arman el organigrama.");
+  const persona = { nombre: "", cargo: "", celular: "", correo: "", equipoId: "", reportaA: "", nota: "" };
+  const red = document.createElement("div");
+  red.className = "rejilla";
+  const equipoLabel = document.createElement("label");
+  equipoLabel.className = "campo";
+  equipoLabel.append(Object.assign(document.createElement("span"), { textContent: "Equipo" }));
+  equipoLabel.append(selectDe([{ id: "", nombre: "Sin equipo" }].concat(equipos.map((item) => ({ id: item.id, nombre: item.nombre }))), "", (v) => (persona.equipoId = v)));
+  const jefeLabel = document.createElement("label");
+  jefeLabel.className = "campo";
+  jefeLabel.append(Object.assign(document.createElement("span"), { textContent: "Reporta a" }));
+  jefeLabel.append(selectDe([{ id: "", nombre: "A nadie, queda arriba" }].concat(personas.map((item) => ({ id: item.id, nombre: item.nombre }))), "", (v) => (persona.reportaA = v)));
+  red.append(
+    campo("Nombre", "", (v) => (persona.nombre = v)),
+    campo("Cargo", "", (v) => (persona.cargo = v)),
+    campo("Celular", "", (v) => (persona.celular = v)),
+    campo("Correo", "", (v) => (persona.correo = v)),
+    equipoLabel,
+    jefeLabel,
+  );
+  const addPersona = document.createElement("button");
+  addPersona.type = "button";
+  addPersona.className = "primario";
+  addPersona.textContent = "Agregar persona";
+  addPersona.onclick = async () => {
+    try {
+      await api("/api/admin/personas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(persona),
+      });
+      toast("Persona agregada");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  gente.append(red, addPersona);
+  personas.forEach((item) => {
+    const fila = document.createElement("article");
+    fila.className = "cota";
+    const jefe = personas.find((personaItem) => personaItem.id === item.reportaA);
+    const equipo = equipos.find((equipoItem) => equipoItem.id === item.equipoId);
+    const p = document.createElement("p");
+    p.innerHTML = `<strong>${esc(item.nombre)}</strong> · ${esc(item.cargo || "Sin cargo")}`;
+    const meta = document.createElement("p");
+    meta.className = "ayuda";
+    meta.textContent = [equipo && equipo.nombre, jefe ? "reporta a " + jefe.nombre : "arriba del organigrama", item.celular, item.correo].filter(Boolean).join(" · ");
+    const borrar = document.createElement("button");
+    borrar.type = "button";
+    borrar.className = "peligro";
+    borrar.textContent = "Quitar";
+    borrar.onclick = async () => {
+      await api("/api/admin/personas/" + encodeURIComponent(item.id), { method: "DELETE" });
+      pintar();
+    };
+    fila.append(p, meta, borrar);
+    gente.append(fila);
+  });
+  caja.append(equiposCard, gente);
+}
+
 async function pintar() {
   pintarNav();
   try {
@@ -739,6 +1362,9 @@ async function pintar() {
     if (vista === "pagina") return pintarPagina();
     if (vista === "apariencia") return pintarApariencia();
     if (vista === "chatbot") return await pintarChatbot();
+    if (vista === "clientes") return await pintarClientes();
+    if (vista === "pedidos") return await pintarPedidos();
+    if (vista === "equipo") return await pintarEquipo();
   } catch (error) {
     vistaEl.innerHTML = "";
     const p = document.createElement("p");

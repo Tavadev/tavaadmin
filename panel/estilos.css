@@ -93,7 +93,14 @@ textarea { min-height: 90px; resize: vertical; }
 }
 .lista-servicios button.item.activa { border-color: var(--acento); box-shadow: inset 3px 0 0 var(--acento); }
 .editor { display: grid; grid-template-columns: 260px 1fr; gap: 16px; }
-.metricas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.metricas { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.punto { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.org { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; padding-bottom: 8px; }
+.org-rama { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.org-hijos { display: flex; gap: 14px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+.org-nodo { background: white; border-radius: 16px; padding: 12px 14px; min-width: 150px; text-align: center; box-shadow: 0 8px 24px rgba(42, 35, 70, 0.05); }
+.org-nodo b { display: block; }
+.org-nodo span { display: block; color: var(--suave); font-size: 0.85rem; }
 .metrica { background: white; border-radius: 18px; padding: 16px; }
 .metrica b { display: block; font-size: 1.8rem; letter-spacing: -1px; }
 .cota { border-bottom: 1px solid var(--linea); padding: 14px 0; }
