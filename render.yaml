@@ -1,0 +1,22 @@
+# Web Service de pago: el plan gratis se duerme y WhatsApp se desconecta.
+services:
+  - type: web
+    name: tavadev
+    runtime: docker
+    plan: starter
+    healthCheckPath: /salud
+    disk:
+      name: tavadev-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: AUTH_PATH
+        value: /data/baileys-auth
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: PANEL_CLAVE
+        sync: false

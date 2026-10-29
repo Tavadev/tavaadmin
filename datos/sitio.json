@@ -1,0 +1,161 @@
+{
+  "marca": {
+    "nombre": "TAVADEV",
+    "frase": "Soluciones tecnológicas sencillas para gente sencilla",
+    "aparte": "un apartado de TAVA · Teatro",
+    "logoClaro": "/marca/logo-claro.jpg",
+    "logoOscuro": "/marca/logo-oscuro.jpg",
+    "simbolo": ""
+  },
+  "estilo": {
+    "fondo": "#FBF8FF",
+    "profundo": "#2A2346",
+    "morado": "#7B5FD1",
+    "acento": "#6A4BC4",
+    "rosado": "#E57FB8",
+    "lavanda": "#B9A3F2",
+    "rosadoPastel": "#F4A6D0",
+    "tarjetaLila": "#E6DEFB",
+    "tarjetaRosa": "#FBDDEC",
+    "texto": "#2A2346",
+    "textoSuave": "#4A4066",
+    "textoOscuroSuave": "#D9CFF5"
+  },
+  "hero": {
+    "etiqueta": "PARA GENTE SENCILLA",
+    "titulo": "Tu negocio, claro para quien te visita.",
+    "acento": "Sin enredos. Sin que tengas que saber de tecnología.",
+    "bajada": "Armamos la página, el chat de WhatsApp o el sistema que te hace falta. Tú lo cuentas con tus palabras. Nosotros lo dejamos funcionando.",
+    "boton": "Quiero una cotización",
+    "secundario": "Ver qué hacemos",
+    "pruebas": [
+      "Te lo explicamos fácil",
+      "Lo dejamos funcionando",
+      "Hecho a la medida de tu negocio"
+    ]
+  },
+  "quienes": {
+    "etiqueta": "01  /  QUIÉNES SOMOS",
+    "titulo": "Conocer personajes para conocer personas. Conocer personas para entender sus necesidades.",
+    "texto": "TAVADEV nace en el escenario, entre personajes. En TAVA, nuestro grupo de teatro, aprendimos que para construir un personaje primero hay que escuchar, observar y ponerse en los zapatos del otro. Hoy hacemos ese mismo ejercicio con cada cliente: conocemos a las personas detrás de cada negocio, entendemos qué necesitan de verdad y solo entonces diseñamos una solución tecnológica sencilla, cercana y hecha a su medida."
+  },
+  "servicios": [
+    {
+      "id": "landing",
+      "activo": true,
+      "icono": "</>",
+      "nombre": "Landing page",
+      "resumen": "Una página clara y amable para presentar tu negocio, proyecto o evento.",
+      "tono": "lila",
+      "imagen": "",
+      "palabras": ["landing", "pagina", "página", "web", "sitio"],
+      "preguntas": [
+        "¿La página es para un negocio, un evento o un proyecto?",
+        "¿Ya tienes logo y textos, o empezamos de cero?",
+        "¿Qué quieres que haga la persona al entrar? Por ejemplo: escribirte, mirar la información o reservar."
+      ]
+    },
+    {
+      "id": "chatbots",
+      "activo": true,
+      "icono": "[ • • • ]",
+      "nombre": "Chatbots",
+      "resumen": "Un asistente que atiende a tus clientes por WhatsApp y resuelve las dudas de siempre.",
+      "tono": "rosa",
+      "imagen": "",
+      "palabras": ["chatbot", "chat", "bot", "whatsapp", "asistente"],
+      "preguntas": [
+        "¿El chat debe atender por WhatsApp?",
+        "¿Qué debe resolver: dudas, pedidos, citas u otra cosa?",
+        "¿Hay momentos en los que una persona deba tomar la conversación?"
+      ]
+    },
+    {
+      "id": "boleteria",
+      "activo": true,
+      "icono": "#001",
+      "nombre": "Sistemas de boletería",
+      "resumen": "Cartelera y venta de boletas en línea para teatros y eventos.",
+      "tono": "oscuro",
+      "imagen": "",
+      "palabras": ["boleteria", "boletería", "boleta", "boletas", "taquilla", "teatro", "evento"],
+      "preguntas": [
+        "¿Es para un teatro, un evento suelto o varios?",
+        "¿Las boletas se venden por internet, en taquilla, o las dos?",
+        "¿Necesitas saber quién ya entró?"
+      ]
+    },
+    {
+      "id": "software",
+      "activo": true,
+      "icono": "{ }",
+      "nombre": "Software a la medida",
+      "resumen": "Programas y sistemas pensados desde cero para lo que tu negocio necesita de verdad.",
+      "tono": "blanco",
+      "imagen": "",
+      "palabras": ["software", "sistema", "programa", "aplicacion", "aplicación", "app"],
+      "preguntas": [
+        "Cuéntanos, con tus palabras, qué se te enreda hoy.",
+        "¿Quién lo va a usar: tú, tu equipo o tus clientes?",
+        "¿Hoy eso lo haces en papel, en una hoja de cálculo o en el chat?"
+      ]
+    }
+  ],
+  "pasos": {
+    "etiqueta": "03  /  CÓMO TRABAJAMOS",
+    "titulo": "Tres pasos. Sin manual eterno.",
+    "items": [
+      {
+        "numero": "01",
+        "titulo": "Nos cuentas",
+        "texto": "Por el chat o por el formulario. Con tus palabras, sin tener que sonar técnico."
+      },
+      {
+        "numero": "02",
+        "titulo": "Lo armamos",
+        "texto": "La página, el asistente o el sistema. Sencillo, con la cara de tu negocio."
+      },
+      {
+        "numero": "03",
+        "titulo": "Te lo dejamos",
+        "texto": "Funcionando, y te explicamos cómo usarlo para que no dependas de nadie cada semana."
+      }
+    ]
+  },
+  "paraQuien": {
+    "etiqueta": "04  /  ES PARA TI SI",
+    "titulo": "Aunque no sepas de tecnología.",
+    "items": [
+      "Quieres que alguien te deje la herramienta lista, sin volverte experto.",
+      "Tienes un negocio, una obra o un evento, y la gente todavía no te encuentra.",
+      "Respondes las mismas preguntas una y otra vez por WhatsApp.",
+      "Llevas el control en cuadernos, hojas o la memoria, y ya no alcanza.",
+      "Quieres verte en serio, con una página que se entienda a la primera."
+    ]
+  },
+  "cierre": {
+    "etiqueta": "HABLEMOS",
+    "titulo": "Cuéntanos qué se te enreda. Lo volvemos sencillo.",
+    "texto": "No publicamos precios: cada caso es distinto. Pides la cotización y te decimos, en claro, qué incluye y cuánto tarda.",
+    "boton": "Pedir cotización"
+  },
+  "contacto": {
+    "whatsapp": "",
+    "correo": "",
+    "instagram": "",
+    "web": "",
+    "prefijo": "57"
+  },
+  "bot": {
+    "bienvenida": "Hola. Soy el asistente de TAVADEV.\nArmamos páginas, chats y sistemas, en sencillo.\n\n¿Qué necesitas? Responde con el número.",
+    "pedirNombre": "¿Cómo te llamas?",
+    "pedirNegocio": "¿Cómo se llama tu negocio, obra o proyecto? Si todavía no tiene nombre, escribe NINGUNO.",
+    "antesDeConfirmar": "Así quedó tu solicitud:",
+    "confirmar": "Responde SI para dejarla anotada. Si algo quedó mal, responde NO y la repetimos.",
+    "gracias": "Listo. Quedó anotada. La revisamos y te escribimos por este chat.",
+    "noEntendi": "No alcancé a entender. Responde con el número del servicio, o escribe MENU para verlos de nuevo.",
+    "cancelado": "Listo, lo dejamos hasta aquí. Cuando quieras, escribe HOLA.",
+    "asesor": "Listo. Una persona de TAVADEV sigue esta conversación. El asistente se queda en silencio en este chat.",
+    "avisos": []
+  }
+}

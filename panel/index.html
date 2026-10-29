@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Panel · TAVADEV</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/panel-assets/estilos.css" />
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <a class="wordmark" href="/" target="_blank" rel="noopener"><span>TAVA</span><span>DEV</span></a>
+      <p class="lado">Panel</p>
+      <nav>
+        <button type="button" data-nav="resumen">Resumen</button>
+        <button type="button" data-nav="pagina">Página</button>
+        <button type="button" data-nav="servicios">Servicios</button>
+        <button type="button" data-nav="apariencia">Apariencia</button>
+        <button type="button" data-nav="bot">Conversación</button>
+        <button type="button" data-nav="cotizaciones">Cotizaciones</button>
+        <button type="button" data-nav="whatsapp">WhatsApp</button>
+      </nav>
+      <button type="button" class="salir" id="salir">Salir</button>
+    </aside>
+    <main>
+      <header class="tope">
+        <div>
+          <p class="etiqueta" id="etiqueta"></p>
+          <h1 id="titulo"></h1>
+        </div>
+        <button type="button" class="primario" id="guardar" hidden>Guardar</button>
+      </header>
+      <div id="vista"></div>
+      <p id="aviso" class="aviso" hidden></p>
+    </main>
+  </div>
+  <script src="/panel-assets/app.js"></script>
+</body>
+</html>

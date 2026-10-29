@@ -1,0 +1,9 @@
+node_modules
+.git
+.env
+CHATBOT 7SEVEND
+media
+datos/cotizaciones.json
+datos/pausas.json
+data
+*.log

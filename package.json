@@ -1,0 +1,22 @@
+{
+  "name": "tavadev",
+  "version": "1.0.0",
+  "description": "TAVADEV: página, panel y chatbot de cotizaciones por WhatsApp",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node bot/probar.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.116.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "multer": "^2.0.2",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  }
+}

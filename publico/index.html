@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TAVADEV · Soluciones tecnológicas sencillas</title>
+  <meta name="description" content="Páginas, chats de WhatsApp y sistemas sencillos para gente que no quiere enredarse con la tecnología. Un apartado de TAVA, teatro." />
+  <meta property="og:title" content="TAVADEV" />
+  <meta property="og:description" content="Soluciones tecnológicas sencillas para gente sencilla." />
+  <meta property="og:image" content="/marca/logo-oscuro.jpg" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/estilos.css" />
+</head>
+<body>
+  <header class="barra">
+    <a class="wordmark" href="#inicio">
+      <span class="tava">TAVA</span><span class="dev">DEV</span>
+    </a>
+    <button type="button" class="boton boton-claro" id="hablar">Hablemos</button>
+  </header>
+  <main id="app">
+    <p class="cargando">Cargando…</p>
+  </main>
+  <a id="wa" class="wa" hidden target="_blank" rel="noopener">WhatsApp</a>
+  <div id="velo" class="velo" hidden>
+    <form id="form-cota" class="modal" novalidate>
+      <button type="button" class="cerrar" id="cerrar" aria-label="Cerrar">×</button>
+      <p class="etiqueta">COTIZACIÓN</p>
+      <h2>Cuéntanos con tus palabras</h2>
+      <p class="ayuda">No hace falta que suene técnico. Con una frase alcanza para empezar.</p>
+      <label>Tu nombre
+        <input name="nombre" autocomplete="name" required maxlength="80" />
+      </label>
+      <label>Negocio, obra o proyecto
+        <input name="negocio" maxlength="80" />
+      </label>
+      <label>Celular
+        <input name="celular" inputmode="tel" autocomplete="tel" maxlength="20" />
+      </label>
+      <label>Qué necesitas
+        <select name="servicioId" required></select>
+      </label>
+      <label>Cuéntanos
+        <textarea name="mensaje" required maxlength="800" placeholder="Por ejemplo: quiero una página para el teatro, todavía no tengo textos."></textarea>
+      </label>
+      <input class="trampa" tabindex="-1" autocomplete="off" name="empresa_web" />
+      <p class="error" id="error-cota" hidden></p>
+      <button type="submit" class="boton boton-solido">Enviar solicitud</button>
+    </form>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
