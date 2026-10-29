@@ -869,7 +869,7 @@ function arbolEquipos(equipos) {
 
 async function organigrama() {
   const [personas, equipos] = await Promise.all([listarPersonas(), listarEquipos()]);
-  return { equipos, equiposArbol: arbolEquipos(equipos), raices: arbol(personas) };
+  return { equipos, personas, equiposArbol: arbolEquipos(equipos), raices: arbol(personas) };
 }
 
 module.exports = {

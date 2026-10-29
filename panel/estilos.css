@@ -182,9 +182,32 @@ textarea { min-height: 90px; resize: vertical; }
   color: white;
   border: 0;
   border-top: 4px solid var(--rosado);
+  max-width: 240px;
 }
-.org-nodo.equipo .cargo { color: var(--lavanda); }
+.org-nodo.equipo .cargo { color: var(--lavanda); text-transform: none; letter-spacing: 0; font-family: "Space Grotesk", sans-serif; font-size: 0.92rem; }
 .org-nodo.equipo .org-ramas { border-top-color: rgba(255, 255, 255, 0.16); color: var(--lavanda); }
+.org-abrir {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.org-gente {
+  margin-top: 10px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  text-align: left;
+}
+.org-gente article { padding: 8px 0 4px; }
+.org-gente article b { font-size: 0.92rem; letter-spacing: 0; }
+.org-gente article span { display: block; margin-top: 2px; color: var(--lavanda); font-size: 0.8rem; }
+.org-gente p { margin: 8px 0 0; color: var(--lavanda); font-size: 0.85rem; }
 .metrica { background: white; border-radius: 18px; padding: 16px; }
 .metrica b { display: block; font-size: 1.8rem; letter-spacing: -1px; }
 .liga {
