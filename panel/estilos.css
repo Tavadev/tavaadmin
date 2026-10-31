@@ -208,6 +208,18 @@ textarea { min-height: 90px; resize: vertical; }
 .org-gente article b { font-size: 0.92rem; letter-spacing: 0; }
 .org-gente article span { display: block; margin-top: 2px; color: var(--lavanda); font-size: 0.8rem; }
 .org-gente p { margin: 8px 0 0; color: var(--lavanda); font-size: 0.85rem; }
+.org-mini {
+  margin: 6px 6px 0 0;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.org-nodo.equipo.abierta { max-width: 320px; }
+.org-editor > .fila { grid-column: 1 / -1; }
 .metrica { background: white; border-radius: 18px; padding: 16px; }
 .metrica b { display: block; font-size: 1.8rem; letter-spacing: -1px; }
 .liga {
