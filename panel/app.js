@@ -158,7 +158,12 @@ function pintarNav() {
     btn.classList.toggle("activa", btn.dataset.nav === vista);
   });
   const tituloClientes = clientesParte === "estados" ? ["CLIENTES", "Estados del recorrido"] : TITULOS.clientes;
-  const tituloEquipo = equipoParte === "organigrama" ? ["EQUIPO", "Organigrama"] : TITULOS.equipo;
+  const titulosEquipo = {
+    personas: ["EQUIPO", "Personas"],
+    equipos: ["EQUIPO", "Equipos"],
+    organigrama: ["EQUIPO", "Organigrama"],
+  };
+  const tituloEquipo = titulosEquipo[equipoParte] || titulosEquipo.personas;
   const mapa = vista === "chatbot" ? TITULOS_CHAT[chatParte] : vista === "clientes" ? tituloClientes : vista === "equipo" ? tituloEquipo : TITULOS[vista];
   const [etiqueta, titulo] = mapa;
   document.getElementById("etiqueta").textContent = etiqueta;
@@ -1243,11 +1248,74 @@ function opcionesDeArbol(lista, campo, excluirId, raiz) {
   return opciones;
 }
 
-function opcionesEquipos(equipos) {
-  return [{ id: "", nombre: "Sin equipo" }].concat(opcionesDeArbol(equipos, "padreId", "", "").slice(1));
+async function publicarPersona(persona) {
+  return api("/api/admin/personas", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(persona),
+  });
 }
 
-function formularioPersona(base, equipos, personas, alTerminar) {
+async function sacarDeEquipo(persona, personas) {
+  const huerfanos = (personas || []).filter((item) => item.equipoId === persona.equipoId && item.reportaA === persona.id);
+  await publicarPersona({ ...persona, equipoId: "", reportaA: "" });
+  for (const otro of huerfanos) await publicarPersona({ ...otro, reportaA: "" });
+}
+
+function enlaceDeEquipo(equipo, equipos, personas) {
+  const caja = document.createElement("div");
+  caja.className = "org-enlace";
+  const disponibles = (personas || []).filter((item) => item.activo !== false && item.equipoId !== equipo.id);
+  const delEquipo = (personas || []).filter((item) => item.equipoId === equipo.id && item.activo !== false);
+  const eleccion = { personaId: "", reportaA: "" };
+  const personaLabel = document.createElement("label");
+  personaLabel.className = "campo";
+  personaLabel.append(Object.assign(document.createElement("span"), { textContent: "Persona guardada" }));
+  const opciones = [{ id: "", nombre: disponibles.length ? "Elige una persona" : "Primero créala en Personas" }];
+  disponibles.forEach((item) => {
+    const actual = (equipos || []).find((eq) => eq.id === item.equipoId);
+    opciones.push({
+      id: item.id,
+      nombre: item.nombre + (item.cargo ? " · " + item.cargo : "") + (actual ? " · está en " + actual.nombre : ""),
+    });
+  });
+  personaLabel.append(selectDe(opciones, "", (v) => (eleccion.personaId = v)));
+  const jefeLabel = document.createElement("label");
+  jefeLabel.className = "campo";
+  jefeLabel.append(Object.assign(document.createElement("span"), { textContent: "Reporta a" }));
+  jefeLabel.append(selectDe(
+    [{ id: "", nombre: "A nadie en este equipo" }].concat(delEquipo.map((item) => ({ id: item.id, nombre: item.nombre }))),
+    "",
+    (v) => (eleccion.reportaA = v),
+  ));
+  const boton = document.createElement("button");
+  boton.type = "button";
+  boton.className = "primario";
+  boton.textContent = "Enlazar";
+  boton.onclick = async () => {
+    const persona = (personas || []).find((item) => item.id === eleccion.personaId);
+    if (!persona) {
+      toast("Elige una persona guardada");
+      return;
+    }
+    try {
+      if (persona.equipoId && persona.equipoId !== equipo.id) {
+        const huerfanos = (personas || []).filter((item) => item.equipoId === persona.equipoId && item.reportaA === persona.id);
+        for (const otro of huerfanos) await publicarPersona({ ...otro, reportaA: "" });
+      }
+      await publicarPersona({ ...persona, equipoId: equipo.id, reportaA: eleccion.reportaA });
+      toast(persona.nombre + " quedó en " + equipo.nombre);
+      equiposAbiertos.add(equipo.id);
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  caja.append(personaLabel, jefeLabel, boton);
+  return caja;
+}
+
+function formularioPersona(base, alTerminar) {
   const draft = {
     id: base.id || "",
     nombre: base.nombre || "",
@@ -1261,14 +1329,6 @@ function formularioPersona(base, equipos, personas, alTerminar) {
   };
   const caja = document.createElement("div");
   caja.className = "rejilla org-editor";
-  const equipoLabel = document.createElement("label");
-  equipoLabel.className = "campo";
-  equipoLabel.append(Object.assign(document.createElement("span"), { textContent: "Equipo" }));
-  equipoLabel.append(selectDe(opcionesEquipos(equipos), draft.equipoId, (v) => (draft.equipoId = v)));
-  const jefeLabel = document.createElement("label");
-  jefeLabel.className = "campo";
-  jefeLabel.append(Object.assign(document.createElement("span"), { textContent: "Reporta a" }));
-  jefeLabel.append(selectDe(opcionesDeArbol(personas, "reportaA", draft.id, "A nadie. Queda arriba"), draft.reportaA, (v) => (draft.reportaA = v)));
   const acciones = document.createElement("div");
   acciones.className = "fila";
   const guardar = document.createElement("button");
@@ -1277,11 +1337,7 @@ function formularioPersona(base, equipos, personas, alTerminar) {
   guardar.textContent = "Guardar";
   guardar.onclick = async () => {
     try {
-      await api("/api/admin/personas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
+      await publicarPersona(draft);
       toast(draft.id ? "Persona actualizada" : "Persona agregada");
       alTerminar();
     } catch (error) {
@@ -1315,8 +1371,6 @@ function formularioPersona(base, equipos, personas, alTerminar) {
     campo("Rol", draft.cargo, (v) => (draft.cargo = v)),
     campo("Celular", draft.celular, (v) => (draft.celular = v)),
     campo("Correo", draft.correo, (v) => (draft.correo = v)),
-    equipoLabel,
-    jefeLabel,
     campo("Nota", draft.nota, (v) => (draft.nota = v), "area"),
     acciones,
   );
@@ -1393,7 +1447,7 @@ function textoPersonas(cantidad) {
   return "Sin personas";
 }
 
-function pintarRama(nodo, personas, esRaiz) {
+function pintarRama(nodo, personas, equipos, esRaiz) {
   const rama = document.createElement("div");
   rama.className = "org-rama";
   if (!esRaiz) {
@@ -1450,7 +1504,21 @@ function pintarRama(nodo, personas, esRaiz) {
       equiposAbiertos.add(nodo.id);
       pintar();
     };
-    ficha.append(quien, detalle, editar);
+    const sacar = document.createElement("button");
+    sacar.type = "button";
+    sacar.className = "org-mini";
+    sacar.textContent = "Sacar";
+    sacar.onclick = async () => {
+      try {
+        await sacarDeEquipo(item, personas);
+        toast(item.nombre + " salió del equipo");
+        equiposAbiertos.add(nodo.id);
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    ficha.append(quien, detalle, editar, sacar);
     gente.append(ficha);
   });
   const herramientas = document.createElement("div");
@@ -1463,17 +1531,8 @@ function pintarRama(nodo, personas, esRaiz) {
     equiposAbiertos.add(nodo.id);
     pintar();
   };
-  const agregar = document.createElement("button");
-  agregar.type = "button";
-  agregar.className = "org-mini";
-  agregar.textContent = "Agregar persona";
-  agregar.onclick = () => {
-    orgEdit = { tipo: "persona", id: "", equipoId: nodo.id };
-    equiposAbiertos.add(nodo.id);
-    pintar();
-  };
-  herramientas.append(editarEquipo, agregar);
-  gente.append(herramientas);
+  herramientas.append(editarEquipo);
+  gente.append(herramientas, enlaceDeEquipo(nodo, equipos, personas));
   abrir.onclick = () => {
     if (equiposAbiertos.has(nodo.id)) equiposAbiertos.delete(nodo.id);
     else equiposAbiertos.add(nodo.id);
@@ -1487,7 +1546,7 @@ function pintarRama(nodo, personas, esRaiz) {
   if (nodo.hijos && nodo.hijos.length) {
     const hijos = document.createElement("div");
     hijos.className = "org-hijos";
-    nodo.hijos.forEach((hijo) => hijos.append(pintarRama(hijo, personas, false)));
+    nodo.hijos.forEach((hijo) => hijos.append(pintarRama(hijo, personas, equipos, false)));
     rama.append(hijos);
   }
   return rama;
@@ -1495,7 +1554,7 @@ function pintarRama(nodo, personas, esRaiz) {
 
 async function pintarEquipo() {
   vistaEl.innerHTML = "";
-  vistaEl.append(subnav([["personas", "Contactos"], ["organigrama", "Organigrama"]], equipoParte, (id) => {
+  vistaEl.append(subnav([["personas", "Personas"], ["equipos", "Equipos"], ["organigrama", "Organigrama"]], equipoParte, (id) => {
     equipoParte = id;
     ir("equipo");
   }));
@@ -1505,25 +1564,25 @@ async function pintarEquipo() {
     caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
     const data = await api("/api/admin/organigrama");
     caja.innerHTML = "";
-    const card = tarjeta("Organigrama", "Haz clic en un equipo para ver a su gente. Desde ahí editas el rol, el celular, el correo y de quién cuelga.");
+    const card = tarjeta("Organigrama", "La persona se crea una vez en Personas. Aquí abres el equipo y solo la enlazas.");
     const equiposArbol = data.equiposArbol || [];
     const personas = data.personas || [];
     if (!equiposArbol.length) {
       const p = document.createElement("p");
       p.className = "ayuda";
-      p.textContent = "Agrega equipos en Contactos y marca de cuál cuelga cada uno.";
+      p.textContent = "Agrega equipos en Equipos y marca de cuál cuelga cada uno.";
       card.append(p);
     } else {
       const org = document.createElement("div");
       org.className = "org";
-      equiposArbol.forEach((raiz) => org.append(pintarRama(raiz, personas, true)));
+      equiposArbol.forEach((raiz) => org.append(pintarRama(raiz, personas, data.equipos || [], true)));
       card.append(org);
     }
     const sueltos = personas.filter((item) => !item.equipoId && item.activo !== false);
     if (sueltos.length) {
       const nota = document.createElement("p");
       nota.className = "ayuda";
-      nota.textContent = "Sin equipo";
+      nota.textContent = "Guardadas, todavía sin equipo";
       const fila = document.createElement("div");
       fila.className = "fila";
       sueltos.forEach((item) => {
@@ -1558,8 +1617,8 @@ async function pintarEquipo() {
         ? personas.find((item) => item.id === orgEdit.id)
         : { nombre: "", cargo: "", celular: "", correo: "", equipoId: orgEdit.equipoId || "", reportaA: "", nota: "" };
       if (base) {
-        const editor = tarjeta(orgEdit.id ? "Editar " + base.nombre : "Nueva persona", "Rol, celular, correo, equipo y a quién reporta.");
-        editor.append(formularioPersona(base, equipos, personas, () => {
+        const editor = tarjeta("Editar " + base.nombre, "Nombre, rol y contacto. El equipo se elige al enlazarla.");
+        editor.append(formularioPersona(base, () => {
           orgEdit = null;
           pintar();
         }));
@@ -1572,7 +1631,7 @@ async function pintarEquipo() {
   caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
   const [equipos, personas] = await Promise.all([api("/api/admin/equipos"), api("/api/admin/personas")]);
   caja.innerHTML = "";
-  const equiposCard = tarjeta("Conectar equipos", "Crea el equipo y, en la lista, elige de cuál cuelga. El que no cuelga de nadie queda arriba.");
+  const equiposCard = tarjeta("Conectar equipos", "Cuelga un equipo de otro. Abajo eliges una persona ya guardada y a quién reporta en ese equipo.");
   const equipoNuevo = { nombre: "", descripcion: "", padreId: "" };
   const alta = document.createElement("div");
   alta.className = "liga";
@@ -1655,27 +1714,44 @@ async function pintarEquipo() {
         pintar();
       }));
     }
+    personas.filter((item) => item.equipoId === equipo.id && item.activo !== false).forEach((item) => {
+      const quien = document.createElement("div");
+      quien.className = "liga";
+      quien.style.paddingLeft = (nivel + 1) * 22 + "px";
+      const nombrePersona = document.createElement("strong");
+      nombrePersona.textContent = item.nombre + (item.cargo ? " · " + item.cargo : "");
+      const sacar = document.createElement("button");
+      sacar.type = "button";
+      sacar.className = "suave";
+      sacar.textContent = "Sacar";
+      sacar.onclick = async () => {
+        try {
+          await sacarDeEquipo(item, personas);
+          toast(item.nombre + " salió del equipo");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      };
+      quien.append(nombrePersona, sacar);
+      bloque.append(quien);
+    });
+    bloque.append(enlaceDeEquipo(equipo, equipos, personas));
     equiposCard.append(bloque);
   });
-  const gente = tarjeta("Conectar personas", "Edita el rol, el celular y el correo. En la fila eliges a quién reporta.");
-  const persona = { nombre: "", cargo: "", celular: "", correo: "", equipoId: "", reportaA: "", nota: "" };
+  if (equipoParte === "equipos") {
+    caja.append(equiposCard);
+    return;
+  }
+  const gente = tarjeta("Personas", "Créala una vez. El rol y el contacto quedan guardados. Después solo la enlazas a un equipo.");
+  const persona = { nombre: "", cargo: "", celular: "", correo: "", nota: "" };
   const altaPersona = document.createElement("div");
   altaPersona.className = "rejilla";
-  const equipoLabel = document.createElement("label");
-  equipoLabel.className = "campo";
-  equipoLabel.append(Object.assign(document.createElement("span"), { textContent: "Equipo" }));
-  equipoLabel.append(selectDe([{ id: "", nombre: "Sin equipo" }].concat(opcionesDeArbol(equipos, "padreId", "", "").slice(1)), "", (v) => (persona.equipoId = v)));
-  const jefeLabel = document.createElement("label");
-  jefeLabel.className = "campo";
-  jefeLabel.append(Object.assign(document.createElement("span"), { textContent: "Reporta a" }));
-  jefeLabel.append(selectDe(opcionesDeArbol(personas, "reportaA", "", "A nadie. Queda arriba"), "", (v) => (persona.reportaA = v)));
   altaPersona.append(
     campo("Nombre", "", (v) => (persona.nombre = v)),
     campo("Rol", "", (v) => (persona.cargo = v)),
     campo("Celular", "", (v) => (persona.celular = v)),
     campo("Correo", "", (v) => (persona.correo = v)),
-    equipoLabel,
-    jefeLabel,
   );
   const addPersona = document.createElement("button");
   addPersona.type = "button";
@@ -1683,11 +1759,7 @@ async function pintarEquipo() {
   addPersona.textContent = "Agregar persona";
   addPersona.onclick = async () => {
     try {
-      await api("/api/admin/personas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(persona),
-      });
+      await publicarPersona(persona);
       toast("Persona agregada");
       pintar();
     } catch (error) {
@@ -1695,28 +1767,21 @@ async function pintarEquipo() {
     }
   };
   gente.append(altaPersona, addPersona);
-  ordenArbol(personas, "reportaA").forEach(({ item, nivel }) => {
+  const ordenadas = personas.slice().sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), "es"));
+  if (!ordenadas.length) {
+    const vacio = document.createElement("p");
+    vacio.className = "ayuda";
+    vacio.textContent = "Todavía no hay personas. La primera queda guardada aunque no tenga equipo.";
+    gente.append(vacio);
+  }
+  ordenadas.forEach((item) => {
     const fila = document.createElement("div");
     fila.className = "liga";
-    fila.style.paddingLeft = nivel * 22 + "px";
+    const equipo = equipos.find((eq) => eq.id === item.equipoId);
     const nombre = document.createElement("strong");
-    nombre.textContent = (nivel ? "↳ " : "") + item.nombre + (item.cargo ? " · " + item.cargo : "");
-    const elegir = document.createElement("label");
-    elegir.className = "campo";
-    elegir.append(Object.assign(document.createElement("span"), { textContent: "Reporta a" }));
-    elegir.append(selectDe(opcionesDeArbol(personas, "reportaA", item.id, "A nadie. Queda arriba"), item.reportaA || "", async (valor) => {
-      try {
-        await api("/api/admin/personas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...item, reportaA: valor }),
-        });
-        toast(valor ? "Quedó conectada" : "Quedó arriba");
-        pintar();
-      } catch (error) {
-        toast(error.message);
-      }
-    }));
+    nombre.textContent = item.nombre + (item.cargo ? " · " + item.cargo : "");
+    const donde = document.createElement("span");
+    donde.textContent = [item.celular, item.correo, equipo ? equipo.nombre : "Sin equipo"].filter(Boolean).join(" · ");
     const acciones = document.createElement("div");
     acciones.className = "fila";
     const editar = document.createElement("button");
@@ -1736,18 +1801,18 @@ async function pintarEquipo() {
       pintar();
     };
     acciones.append(editar, borrar);
-    fila.append(nombre, elegir, acciones);
+    fila.append(nombre, donde, acciones);
     const bloque = document.createElement("div");
     bloque.append(fila);
     if (contactoEdit === item.id) {
-      bloque.append(formularioPersona(item, equipos, personas, () => {
+      bloque.append(formularioPersona(item, () => {
         contactoEdit = null;
         pintar();
       }));
     }
     gente.append(bloque);
   });
-  caja.append(equiposCard, gente);
+  caja.append(gente);
 }
 
 async function pintar() {

@@ -220,6 +220,20 @@ textarea { min-height: 90px; resize: vertical; }
 }
 .org-nodo.equipo.abierta { max-width: 320px; }
 .org-editor > .fila { grid-column: 1 / -1; }
+.org-enlace {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 4px;
+  background: white;
+  color: var(--texto);
+  border: 1px solid var(--linea);
+  border-radius: 14px;
+  padding: 10px;
+  text-align: left;
+}
+.org-enlace .campo { margin: 0; }
+.org-enlace .campo span { color: var(--suave); }
+.org-enlace .primario { justify-self: start; }
 .metrica { background: white; border-radius: 18px; padding: 16px; }
 .metrica b { display: block; font-size: 1.8rem; letter-spacing: -1px; }
 .liga {
