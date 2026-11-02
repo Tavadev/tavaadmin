@@ -1,5 +1,6 @@
 let sitio = null;
 let vista = "resumen";
+let paginaParte = "portada";
 let chatParte = "clientes";
 let clientesParte = "fichas";
 let equipoParte = "personas";
@@ -8,18 +9,32 @@ let orgEdit = null;
 let contactoEdit = null;
 let servicioId = null;
 let pedidoDesde = "";
+let internoParte = "sala";
+let chatAbierto = "";
+let chatComponer = "";
+let chatYo = "";
+let chatPersonas = [];
 let reloj = null;
+let sesion = { maestro: true, papel: "admin", personaId: "", usuarioId: "", usuario: "", nombre: "" };
+let actividadParte = "tablero";
+let sprintVista = "";
+let epicaFiltro = "";
+let personaFiltro = "";
+let tareaAbierta = "";
+let arrastrando = false;
 
 const vistaEl = document.getElementById("vista");
 const aviso = document.getElementById("aviso");
 
 const TITULOS = {
   resumen: ["HOY", "Resumen"],
-  pagina: ["LA PÁGINA", "Textos que ve la gente"],
-  apariencia: ["ESTILO", "Colores e imágenes"],
+  pagina: ["LA PÁGINA", "Todo lo que ve la gente"],
   clientes: ["CLIENTES", "Estados y fichas"],
   pedidos: ["PEDIDOS", "Trabajos con cada cliente"],
   equipo: ["EQUIPO", "Contactos y organigrama"],
+  chat: ["CHAT", "Conversaciones del equipo"],
+  actividades: ["ACTIVIDADES", "Tablero"],
+  usuarios: ["USUARIOS", "Acceso del equipo"],
 };
 const TITULOS_CHAT = {
   clientes: ["CHATBOT", "Seguimiento de clientes"],
@@ -62,7 +77,7 @@ function campo(etiqueta, valor, alCambiar, tipo) {
   const span = document.createElement("span");
   span.textContent = etiqueta;
   const input = document.createElement(tipo === "area" ? "textarea" : "input");
-  if (tipo === "color") input.type = "color";
+  if (tipo === "color" || tipo === "date" || tipo === "number" || tipo === "password") input.type = tipo;
   input.value = valor || "";
   input.addEventListener("input", () => alCambiar(input.value));
   label.append(span, input);
@@ -146,6 +161,33 @@ async function guardar() {
   }
 }
 
+function esAdmin() {
+  return sesion.maestro || sesion.papel === "admin";
+}
+
+function aplicarSesion() {
+  document.querySelectorAll("[data-nav]").forEach((btn) => {
+    const libre = btn.dataset.nav === "chat" || btn.dataset.nav === "actividades";
+    btn.hidden = !esAdmin() && !libre;
+  });
+  const quien = document.getElementById("quien");
+  if (quien) quien.textContent = sesion.maestro ? "Clave del panel" : (sesion.nombre || sesion.usuario || "");
+  if (sesion.personaId) chatYo = sesion.personaId;
+  else {
+    try { chatYo = localStorage.getItem("tavadev-chat-yo") || ""; } catch (error) { chatYo = chatYo || ""; }
+  }
+  if (!esAdmin() && vista !== "chat" && vista !== "actividades") vista = "actividades";
+}
+
+function elegir(etiqueta, opciones, valor, alCambiar) {
+  const label = document.createElement("label");
+  label.className = "campo";
+  const span = document.createElement("span");
+  span.textContent = etiqueta;
+  label.append(span, selectDe(opciones, valor, alCambiar));
+  return label;
+}
+
 function ir(nombre) {
   vista = nombre;
   if (reloj) clearInterval(reloj);
@@ -160,11 +202,44 @@ function pintarNav() {
   const tituloClientes = clientesParte === "estados" ? ["CLIENTES", "Estados del recorrido"] : TITULOS.clientes;
   const titulosEquipo = {
     personas: ["EQUIPO", "Personas"],
+    roles: ["EQUIPO", "Roles"],
     equipos: ["EQUIPO", "Equipos"],
     organigrama: ["EQUIPO", "Organigrama"],
   };
+  const titulosInterno = {
+    sala: ["CHAT", "Conversaciones del equipo"],
+    disponibilidad: ["CHAT", "Disponibilidad"],
+  };
+  const titulosActividad = {
+    tablero: ["ACTIVIDADES", "Tablero"],
+    backlog: ["ACTIVIDADES", "Backlog"],
+    epicas: ["ACTIVIDADES", "Épicas"],
+    sprints: ["ACTIVIDADES", "Sprints"],
+    estados: ["ACTIVIDADES", "Estados"],
+  };
+  const titulosPagina = {
+    portada: ["PÁGINA", "Portada"],
+    quienes: ["PÁGINA", "Quiénes somos"],
+    pasos: ["PÁGINA", "Cómo trabajamos"],
+    para: ["PÁGINA", "Es para ti"],
+    cierre: ["PÁGINA", "Cierre"],
+    contacto: ["PÁGINA", "Contacto"],
+    marca: ["PÁGINA", "Marca y colores"],
+  };
   const tituloEquipo = titulosEquipo[equipoParte] || titulosEquipo.personas;
-  const mapa = vista === "chatbot" ? TITULOS_CHAT[chatParte] : vista === "clientes" ? tituloClientes : vista === "equipo" ? tituloEquipo : TITULOS[vista];
+  const mapa = vista === "chatbot"
+    ? TITULOS_CHAT[chatParte]
+    : vista === "pagina" || vista === "apariencia"
+      ? titulosPagina[paginaParte] || titulosPagina.portada
+    : vista === "clientes"
+      ? tituloClientes
+      : vista === "equipo"
+        ? tituloEquipo
+        : vista === "chat"
+          ? titulosInterno[internoParte] || titulosInterno.sala
+          : vista === "actividades"
+            ? titulosActividad[actividadParte] || titulosActividad.tablero
+            : TITULOS[vista];
   const [etiqueta, titulo] = mapa;
   document.getElementById("etiqueta").textContent = etiqueta;
   document.getElementById("titulo").textContent = titulo;
@@ -174,10 +249,11 @@ function pintarNav() {
 
 async function pintarResumen() {
   vistaEl.innerHTML = "<p class='ayuda'>Cargando…</p>";
-  const [estado, cotas, pedidos] = await Promise.all([
+  const [estado, cotas, pedidos, tableroDatos] = await Promise.all([
     api("/api/admin/estado"),
     api("/api/admin/cotizaciones"),
     api("/api/admin/pedidos").catch(() => []),
+    api("/api/admin/tablero").catch(() => null),
   ]);
   vistaEl.innerHTML = "";
   const nums = document.createElement("div");
@@ -190,6 +266,14 @@ async function pintarResumen() {
     ["Pedidos abiertos", abiertos],
     ["WhatsApp", estado.whatsapp && estado.whatsapp.titulo],
   ];
+  if (tableroDatos) {
+    const abiertas = tableroDatos.tareas.filter((item) => {
+      const estadoTarea = tableroDatos.estados.find((estadoItem) => estadoItem.id === item.estadoId);
+      return !estadoTarea || !estadoTarea.esFinal;
+    }).length;
+    const sprint = tableroDatos.sprints.find((item) => item.estado === "activo");
+    bloques.push(["Tareas abiertas", abiertas], ["Sprint", sprint ? sprint.nombre : "Sin sprint activo"]);
+  }
   for (const [nombre, valor] of bloques) {
     const card = document.createElement("article");
     card.className = "metrica";
@@ -222,7 +306,27 @@ async function pintarResumen() {
 }
 
 function pintarPagina() {
+  if (vista === "apariencia") {
+    vista = "pagina";
+    paginaParte = "marca";
+  }
   vistaEl.innerHTML = "";
+  vistaEl.append(subnav([
+    ["portada", "Portada"],
+    ["quienes", "Quiénes"],
+    ["pasos", "Cómo"],
+    ["para", "Para ti"],
+    ["cierre", "Cierre"],
+    ["contacto", "Contacto"],
+    ["marca", "Marca"],
+  ], paginaParte, (id) => {
+    paginaParte = id;
+    ir("pagina");
+  }));
+  if (paginaParte === "marca") {
+    pintarMarca();
+    return;
+  }
   const hero = tarjeta("Portada", "El mensaje grande. Una idea, dicha claro.");
   const rejilla = document.createElement("div");
   rejilla.className = "rejilla";
@@ -300,7 +404,8 @@ function pintarPagina() {
     campo("Indicativo del país", sitio.contacto.prefijo, (v) => (sitio.contacto.prefijo = v)),
   );
   contacto.append(red);
-  vistaEl.append(hero, quienes, pasos, para, cierre, contacto);
+  const bloques = { portada: hero, quienes, pasos, para, cierre, contacto };
+  vistaEl.append(bloques[paginaParte] || hero);
 }
 
 function servicioActual() {
@@ -513,9 +618,8 @@ const COLORES = [
   ["textoOscuroSuave", "Texto sobre fondo oscuro"],
 ];
 
-function pintarApariencia() {
-  vistaEl.innerHTML = "";
-  const fotos = tarjeta("Imágenes", "El panel no cambia de colores: así siempre puedes leerlo. Lo que guardes aquí se ve en la página.");
+function pintarMarca() {
+  const fotos = tarjeta("Imágenes", "El panel no cambia de colores: así siempre puedes leerlo. Lo que guardes aquí se ve en la página. Pulsa Guardar arriba.");
   fotos.append(
     imagenCampo("Logo para fondo claro", sitio.marca.logoClaro, (url) => (sitio.marca.logoClaro = url)),
     imagenCampo("Logo para fondo oscuro", sitio.marca.logoOscuro, (url) => (sitio.marca.logoOscuro = url)),
@@ -1315,7 +1419,24 @@ function enlaceDeEquipo(equipo, equipos, personas) {
   return caja;
 }
 
-function formularioPersona(base, alTerminar) {
+function selectorRol(roles, valor, alElegir) {
+  const label = document.createElement("label");
+  label.className = "campo";
+  label.append(Object.assign(document.createElement("span"), { textContent: "Rol" }));
+  const opciones = [{ id: "", nombre: (roles || []).length ? "Sin rol" : "Primero créalo en Roles" }];
+  (roles || []).forEach((rol) => opciones.push({ id: rol.id, nombre: rol.codigo + " · " + rol.nombre }));
+  label.append(selectDe(opciones, valor || "", alElegir));
+  return label;
+}
+
+function textoRol(persona, roles, caracteristicas) {
+  const rol = (roles || []).find((item) => item.id === persona.rolId);
+  if (!rol) return persona.cargo || "Sin rol";
+  const rasgos = (caracteristicas || []).filter((item) => item.rolId === rol.id).map((item) => item.codigo);
+  return [rol.codigo, rol.nombre].concat(rasgos).join(" · ");
+}
+
+function formularioPersona(base, roles, alTerminar) {
   const draft = {
     id: base.id || "",
     nombre: base.nombre || "",
@@ -1323,8 +1444,10 @@ function formularioPersona(base, alTerminar) {
     celular: base.celular || "",
     correo: base.correo || "",
     equipoId: base.equipoId || "",
+    rolId: base.rolId || "",
     reportaA: base.reportaA || "",
     nota: base.nota || "",
+    foto: base.foto || "",
     activo: base.activo !== false,
   };
   const caja = document.createElement("div");
@@ -1366,9 +1489,15 @@ function formularioPersona(base, alTerminar) {
     };
     acciones.append(quitar);
   }
+  const rolLabel = selectorRol(roles, draft.rolId, (valor) => {
+    draft.rolId = valor;
+    const rol = (roles || []).find((item) => item.id === valor);
+    draft.cargo = rol ? rol.nombre : "";
+  });
   caja.append(
+    fotoDePersona(draft),
     campo("Nombre", draft.nombre, (v) => (draft.nombre = v)),
-    campo("Rol", draft.cargo, (v) => (draft.cargo = v)),
+    rolLabel,
     campo("Celular", draft.celular, (v) => (draft.celular = v)),
     campo("Correo", draft.correo, (v) => (draft.correo = v)),
     campo("Nota", draft.nota, (v) => (draft.nota = v), "area"),
@@ -1447,7 +1576,7 @@ function textoPersonas(cantidad) {
   return "Sin personas";
 }
 
-function pintarRama(nodo, personas, equipos, esRaiz) {
+function pintarRama(nodo, personas, equipos, roles, caracteristicas, esRaiz) {
   const rama = document.createElement("div");
   rama.className = "org-rama";
   if (!esRaiz) {
@@ -1470,7 +1599,7 @@ function pintarRama(nodo, personas, equipos, esRaiz) {
   const cargo = document.createElement("span");
   cargo.className = "cargo";
   cargo.textContent = encargados.length
-    ? encargados.map((item) => (item.cargo ? item.nombre + " · " + item.cargo : item.nombre)).join(" · ")
+    ? encargados.map((item) => item.nombre + " · " + textoRol(item, roles, caracteristicas)).join(" · ")
     : "Sin encargado";
   const pie = document.createElement("p");
   pie.className = "org-ramas";
@@ -1494,7 +1623,7 @@ function pintarRama(nodo, personas, equipos, esRaiz) {
     quien.textContent = (nivel ? "↳ " : "") + item.nombre;
     const detalle = document.createElement("span");
     const jefe = delEquipo.find((persona) => persona.id === item.reportaA);
-    detalle.textContent = [item.cargo || "Sin rol", item.celular, item.correo, jefe ? "reporta a " + jefe.nombre : ""].filter(Boolean).join(" · ");
+    detalle.textContent = [textoRol(item, roles, caracteristicas), item.celular, item.correo, jefe ? "reporta a " + jefe.nombre : ""].filter(Boolean).join(" · ");
     const editar = document.createElement("button");
     editar.type = "button";
     editar.className = "org-mini";
@@ -1546,15 +1675,166 @@ function pintarRama(nodo, personas, equipos, esRaiz) {
   if (nodo.hijos && nodo.hijos.length) {
     const hijos = document.createElement("div");
     hijos.className = "org-hijos";
-    nodo.hijos.forEach((hijo) => hijos.append(pintarRama(hijo, personas, equipos, false)));
+    nodo.hijos.forEach((hijo) => hijos.append(pintarRama(hijo, personas, equipos, roles, caracteristicas, false)));
     rama.append(hijos);
   }
   return rama;
 }
 
+function vistaRoles(roles, caracteristicas) {
+  const card = tarjeta("Roles", "El identificador es corto y único, como LIDER. Cada característica del rol también tiene el suyo, como DECIDE.");
+  const nuevo = { codigo: "", nombre: "", descripcion: "" };
+  const alta = document.createElement("div");
+  alta.className = "rejilla";
+  alta.append(
+    campo("Identificador", "", (v) => (nuevo.codigo = v)),
+    campo("Nombre", "", (v) => (nuevo.nombre = v)),
+    campo("Descripción", "", (v) => (nuevo.descripcion = v), "area"),
+  );
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "primario";
+  add.textContent = "Agregar rol";
+  add.onclick = async () => {
+    try {
+      await api("/api/admin/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nuevo),
+      });
+      toast("Rol guardado");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  card.append(alta, add);
+  if (!roles.length) {
+    const vacio = document.createElement("p");
+    vacio.className = "ayuda";
+    vacio.textContent = "Todavía no hay roles. Si no guarda, pega de nuevo supabase/schema.sql en Supabase.";
+    card.append(vacio);
+  }
+  roles.forEach((rol) => {
+    const bloque = document.createElement("div");
+    const fila = document.createElement("div");
+    fila.className = "liga";
+    const nombre = document.createElement("strong");
+    nombre.textContent = rol.codigo + " · " + rol.nombre;
+    const detalle = document.createElement("span");
+    detalle.textContent = rol.descripcion || "Sin descripción";
+    const acciones = document.createElement("div");
+    acciones.className = "fila";
+    const editar = document.createElement("button");
+    editar.type = "button";
+    editar.className = "suave";
+    editar.textContent = "Editar";
+    editar.onclick = () => {
+      contactoEdit = contactoEdit === "r:" + rol.id ? null : "r:" + rol.id;
+      pintar();
+    };
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "suave";
+    quitar.textContent = "Quitar";
+    quitar.onclick = async () => {
+      try {
+        await api("/api/admin/roles/" + encodeURIComponent(rol.id), { method: "DELETE" });
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    acciones.append(editar, quitar);
+    fila.append(nombre, detalle, acciones);
+    bloque.append(fila);
+    if (contactoEdit === "r:" + rol.id) {
+      const draft = { id: rol.id, codigo: rol.codigo, nombre: rol.nombre, descripcion: rol.descripcion || "" };
+      const form = document.createElement("div");
+      form.className = "rejilla";
+      form.append(
+        campo("Identificador", draft.codigo, (v) => (draft.codigo = v)),
+        campo("Nombre", draft.nombre, (v) => (draft.nombre = v)),
+        campo("Descripción", draft.descripcion, (v) => (draft.descripcion = v), "area"),
+      );
+      const guardar = document.createElement("button");
+      guardar.type = "button";
+      guardar.className = "primario";
+      guardar.textContent = "Guardar rol";
+      guardar.onclick = async () => {
+        try {
+          await api("/api/admin/roles", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(draft),
+          });
+          contactoEdit = null;
+          toast("Rol actualizado");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      };
+      form.append(guardar);
+      bloque.append(form);
+    }
+    const rasgos = caracteristicas.filter((item) => item.rolId === rol.id);
+    rasgos.forEach((rasgo) => {
+      const linea = document.createElement("div");
+      linea.className = "liga";
+      linea.style.paddingLeft = "22px";
+      const texto = document.createElement("strong");
+      texto.textContent = rasgo.codigo + " · " + rasgo.nombre;
+      const sacar = document.createElement("button");
+      sacar.type = "button";
+      sacar.className = "suave";
+      sacar.textContent = "Quitar";
+      sacar.onclick = async () => {
+        try {
+          await api("/api/admin/caracteristicas/" + encodeURIComponent(rasgo.id), { method: "DELETE" });
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      };
+      linea.append(texto, document.createElement("span"), sacar);
+      bloque.append(linea);
+    });
+    const rasgo = { rolId: rol.id, codigo: "", nombre: "" };
+    const altaRasgo = document.createElement("div");
+    altaRasgo.className = "liga";
+    altaRasgo.style.paddingLeft = "22px";
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "primario";
+    boton.textContent = "Agregar característica";
+    boton.onclick = async () => {
+      try {
+        await api("/api/admin/caracteristicas", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(rasgo),
+        });
+        toast("Característica guardada");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    altaRasgo.append(
+      campo("Identificador", "", (v) => (rasgo.codigo = v)),
+      campo("Nombre", "", (v) => (rasgo.nombre = v)),
+      boton,
+    );
+    bloque.append(altaRasgo);
+    card.append(bloque);
+  });
+  return card;
+}
+
 async function pintarEquipo() {
   vistaEl.innerHTML = "";
-  vistaEl.append(subnav([["personas", "Personas"], ["equipos", "Equipos"], ["organigrama", "Organigrama"]], equipoParte, (id) => {
+  vistaEl.append(subnav([["personas", "Personas"], ["roles", "Roles"], ["equipos", "Equipos"], ["organigrama", "Organigrama"]], equipoParte, (id) => {
     equipoParte = id;
     ir("equipo");
   }));
@@ -1564,7 +1844,45 @@ async function pintarEquipo() {
     caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
     const data = await api("/api/admin/organigrama");
     caja.innerHTML = "";
-    const card = tarjeta("Organigrama", "La persona se crea una vez en Personas. Aquí abres el equipo y solo la enlazas.");
+    const card = tarjeta("Organigrama", "La persona se crea una vez en Personas, con un rol. Aquí abres el equipo y solo la enlazas.");
+    const generar = document.createElement("button");
+    generar.type = "button";
+    generar.className = "suave";
+    generar.textContent = "Generar SQL";
+    generar.onclick = async () => {
+      try {
+        const dataSql = await api("/api/admin/organigrama/sql");
+        let cajaSql = card.querySelector(".org-sql-caja");
+        if (!cajaSql) {
+          cajaSql = document.createElement("div");
+          cajaSql.className = "org-sql-caja";
+          const area = document.createElement("textarea");
+          area.className = "org-sql";
+          area.readOnly = true;
+          const copiar = document.createElement("button");
+          copiar.type = "button";
+          copiar.className = "primario";
+          copiar.textContent = "Copiar";
+          copiar.onclick = async () => {
+            area.focus();
+            area.select();
+            try {
+              await navigator.clipboard.writeText(area.value);
+              toast("SQL copiado");
+            } catch (error) {
+              toast("Selecciona el SQL y cópialo");
+            }
+          };
+          cajaSql.append(area, copiar);
+          card.append(cajaSql);
+        }
+        cajaSql.querySelector("textarea").value = dataSql.sql || "";
+        toast("SQL listo");
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    card.append(generar);
     const equiposArbol = data.equiposArbol || [];
     const personas = data.personas || [];
     if (!equiposArbol.length) {
@@ -1575,7 +1893,7 @@ async function pintarEquipo() {
     } else {
       const org = document.createElement("div");
       org.className = "org";
-      equiposArbol.forEach((raiz) => org.append(pintarRama(raiz, personas, data.equipos || [], true)));
+      equiposArbol.forEach((raiz) => org.append(pintarRama(raiz, personas, data.equipos || [], data.roles || [], data.caracteristicas || [], true)));
       card.append(org);
     }
     const sueltos = personas.filter((item) => !item.equipoId && item.activo !== false);
@@ -1618,7 +1936,7 @@ async function pintarEquipo() {
         : { nombre: "", cargo: "", celular: "", correo: "", equipoId: orgEdit.equipoId || "", reportaA: "", nota: "" };
       if (base) {
         const editor = tarjeta("Editar " + base.nombre, "Nombre, rol y contacto. El equipo se elige al enlazarla.");
-        editor.append(formularioPersona(base, () => {
+        editor.append(formularioPersona(base, data.roles || [], () => {
           orgEdit = null;
           pintar();
         }));
@@ -1629,8 +1947,17 @@ async function pintarEquipo() {
     return;
   }
   caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
-  const [equipos, personas] = await Promise.all([api("/api/admin/equipos"), api("/api/admin/personas")]);
+  const [equipos, personas, roles, caracteristicas] = await Promise.all([
+    api("/api/admin/equipos"),
+    api("/api/admin/personas"),
+    api("/api/admin/roles"),
+    api("/api/admin/caracteristicas"),
+  ]);
   caja.innerHTML = "";
+  if (equipoParte === "roles") {
+    caja.append(vistaRoles(roles, caracteristicas));
+    return;
+  }
   const equiposCard = tarjeta("Conectar equipos", "Cuelga un equipo de otro. Abajo eliges una persona ya guardada y a quién reporta en ese equipo.");
   const equipoNuevo = { nombre: "", descripcion: "", padreId: "" };
   const alta = document.createElement("div");
@@ -1744,12 +2071,16 @@ async function pintarEquipo() {
     return;
   }
   const gente = tarjeta("Personas", "Créala una vez. El rol y el contacto quedan guardados. Después solo la enlazas a un equipo.");
-  const persona = { nombre: "", cargo: "", celular: "", correo: "", nota: "" };
+  const persona = { nombre: "", cargo: "", rolId: "", celular: "", correo: "", nota: "" };
   const altaPersona = document.createElement("div");
   altaPersona.className = "rejilla";
   altaPersona.append(
     campo("Nombre", "", (v) => (persona.nombre = v)),
-    campo("Rol", "", (v) => (persona.cargo = v)),
+    selectorRol(roles, "", (valor) => {
+      persona.rolId = valor;
+      const rol = roles.find((item) => item.id === valor);
+      persona.cargo = rol ? rol.nombre : "";
+    }),
     campo("Celular", "", (v) => (persona.celular = v)),
     campo("Correo", "", (v) => (persona.correo = v)),
   );
@@ -1777,9 +2108,10 @@ async function pintarEquipo() {
   ordenadas.forEach((item) => {
     const fila = document.createElement("div");
     fila.className = "liga";
-    const equipo = equipos.find((eq) => eq.id === item.equipoId);
+    const rol = roles.find((itemRol) => itemRol.id === item.rolId);
+    const equipo = equipos.find((itemEquipo) => itemEquipo.id === item.equipoId);
     const nombre = document.createElement("strong");
-    nombre.textContent = item.nombre + (item.cargo ? " · " + item.cargo : "");
+    nombre.append(avatarDe(item, "sm"), document.createTextNode(" " + item.nombre + (rol ? " · " + rol.codigo : item.cargo ? " · " + item.cargo : "")));
     const donde = document.createElement("span");
     donde.textContent = [item.celular, item.correo, equipo ? equipo.nombre : "Sin equipo"].filter(Boolean).join(" · ");
     const acciones = document.createElement("div");
@@ -1805,7 +2137,7 @@ async function pintarEquipo() {
     const bloque = document.createElement("div");
     bloque.append(fila);
     if (contactoEdit === item.id) {
-      bloque.append(formularioPersona(item, () => {
+      bloque.append(formularioPersona(item, roles, () => {
         contactoEdit = null;
         pintar();
       }));
@@ -1815,16 +2147,1348 @@ async function pintarEquipo() {
   caja.append(gente);
 }
 
+const EMOTES = ["✨", "🎭", "💜", "👏", "🔥", "😂", "🙌", "💪", "🌙", "✅", "❤️", "👀", "🎉", "🤝", "😴", "🫡"];
+
+function nombreVisible(persona) {
+  if (!persona) return "Alguien";
+  return persona.apodo || persona.nombre || "Alguien";
+}
+
+function inicialesDe(persona) {
+  const base = nombreVisible(persona);
+  const partes = String(base).trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  if (!partes.length) return "?";
+  return partes.map((parte) => parte[0]).join("").toUpperCase();
+}
+
+function colorDeAvatar(id) {
+  const paleta = ["#6A4BC4", "#E57FB8", "#2A2346", "#7B5FD1", "#9D2F4A", "#3C8F63"];
+  let n = 0;
+  String(id || "?").split("").forEach((letra) => { n += letra.charCodeAt(0); });
+  return paleta[n % paleta.length];
+}
+
+function avatarDe(persona, tam, colorEstado) {
+  const el = document.createElement("span");
+  el.className = "avatar" + (tam === "lg" ? " lg" : tam === "sm" ? " sm" : "");
+  if (persona && persona.foto) {
+    const img = document.createElement("img");
+    img.src = persona.foto;
+    img.alt = "";
+    el.append(img);
+  } else {
+    el.style.background = colorDeAvatar(persona && persona.id);
+    el.textContent = inicialesDe(persona);
+  }
+  if (colorEstado) {
+    const punto = document.createElement("i");
+    punto.className = "punto-estado";
+    punto.style.background = colorEstado;
+    el.append(punto);
+  }
+  return el;
+}
+
+function avatarGrupo(gente) {
+  const caras = (gente || []).filter(Boolean).slice(0, 4);
+  if (caras.length <= 1) return avatarDe(caras[0] || null);
+  const caja = document.createElement("span");
+  caja.className = "mosaico";
+  caras.forEach((persona) => caja.append(avatarDe(persona, "sm")));
+  return caja;
+}
+
+function fotoDePersona(draft) {
+  const caja = document.createElement("div");
+  caja.className = "campo ancho";
+  const span = document.createElement("span");
+  span.textContent = "Foto";
+  const fila = document.createElement("div");
+  fila.className = "fila";
+  const poner = () => {
+    const viejo = fila.querySelector(".avatar");
+    const nuevo = avatarDe(draft, "lg");
+    if (viejo) viejo.replaceWith(nuevo);
+    else fila.prepend(nuevo);
+  };
+  poner();
+  const file = document.createElement("input");
+  file.type = "file";
+  file.accept = "image/png,image/jpeg,image/webp,image/gif";
+  file.addEventListener("change", async () => {
+    const archivo = file.files && file.files[0];
+    if (!archivo) return;
+    const cuerpo = new FormData();
+    cuerpo.append("archivo", archivo);
+    try {
+      const data = await api("/api/admin/media", { method: "POST", body: cuerpo });
+      draft.foto = data.url;
+      poner();
+      toast("Foto lista. Guarda la ficha.");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  const quitar = document.createElement("button");
+  quitar.type = "button";
+  quitar.className = "suave";
+  quitar.textContent = "Quitar foto";
+  quitar.onclick = () => {
+    draft.foto = "";
+    poner();
+  };
+  fila.append(file, quitar);
+  caja.append(span, fila);
+  return caja;
+}
+
+function horaLista(valor) {
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return "";
+  const hoy = new Date();
+  if (fecha.toDateString() === hoy.toDateString()) {
+    return fecha.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" });
+  }
+  return fecha.toLocaleDateString("es-CO", { day: "numeric", month: "short" });
+}
+
+function etiquetaPersona(persona) {
+  return [persona.nombre, persona.apodo, persona.cargo].filter(Boolean).join(" · ");
+}
+
+function horaCorta(valor) {
+  const fecha = new Date(valor);
+  if (Number.isNaN(fecha.getTime())) return "";
+  return fecha.toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function tituloDeChat(chat, personas) {
+  if (chat.tipo === "grupo") return chat.nombre || "Grupo";
+  const otro = (chat.miembros || []).map((id) => personas.find((item) => item.id === id)).find((item) => item && item.id !== chatYo);
+  return otro ? nombreVisible(otro) : "Chat";
+}
+
+function pintarHilo(hilo, mensajes) {
+  hilo.innerHTML = "";
+  hilo.dataset.ultimo = mensajes.length ? mensajes[mensajes.length - 1].id : "";
+  if (!mensajes.length) {
+    const vacio = document.createElement("p");
+    vacio.className = "ayuda";
+    vacio.textContent = "Todavía no hay mensajes. Escribe abajo o manda un emote.";
+    hilo.append(vacio);
+    return;
+  }
+  mensajes.forEach((mensaje, indice) => {
+    const anterior = mensajes[indice - 1];
+    const sigue = Boolean(anterior && anterior.personaId && anterior.personaId === mensaje.personaId);
+    const persona = chatPersonas.find((item) => item.id === mensaje.personaId);
+    const fila = document.createElement("article");
+    fila.className = "msg" + (sigue ? " sigue" : "");
+    if (!sigue) fila.append(avatarDe(persona));
+    const cuerpo = document.createElement("div");
+    if (!sigue) {
+      const meta = document.createElement("div");
+      meta.className = "msg-meta";
+      const quien = document.createElement("b");
+      quien.textContent = nombreVisible(persona);
+      quien.style.color = colorDeAvatar(persona && persona.id);
+      const hora = document.createElement("span");
+      hora.textContent = horaCorta(mensaje.creadoEn);
+      meta.append(quien, hora);
+      cuerpo.append(meta);
+    }
+    const texto = document.createElement("p");
+    if (mensaje.emote && !mensaje.texto) {
+      texto.className = "emote-grande";
+      texto.textContent = mensaje.emote;
+    } else {
+      texto.textContent = (mensaje.emote ? mensaje.emote + " " : "") + mensaje.texto;
+    }
+    cuerpo.append(texto);
+    fila.append(cuerpo);
+    hilo.append(fila);
+  });
+  hilo.scrollTop = hilo.scrollHeight;
+}
+
+async function refrescarMensajes() {
+  const hilo = vistaEl.querySelector("[data-hilo]");
+  if (!hilo || vista !== "chat" || !chatAbierto) return;
+  try {
+    const mensajes = await api("/api/admin/mensajes?chat=" + encodeURIComponent(chatAbierto));
+    const ultimo = mensajes.length ? mensajes[mensajes.length - 1].id : "";
+    if (ultimo === (hilo.dataset.ultimo || "") && hilo.childElementCount) return;
+    pintarHilo(hilo, mensajes);
+  } catch (error) {
+    /* el siguiente envío muestra el error */
+  }
+}
+
+async function pintarChat() {
+  if (reloj) clearInterval(reloj);
+  reloj = null;
+  vistaEl.innerHTML = "";
+  const caja = document.createElement("div");
+  vistaEl.append(caja);
+  caja.innerHTML = "<p class='ayuda'>Cargando…</p>";
+  const [personas, chats, disponibilidades] = await Promise.all([
+    api("/api/admin/personas"),
+    api("/api/admin/chats"),
+    api("/api/admin/disponibilidades"),
+  ]);
+  chatPersonas = personas;
+  if (sesion.personaId) chatYo = sesion.personaId;
+  else if (!personas.some((item) => item.id === chatYo)) chatYo = "";
+  caja.innerHTML = "";
+  if (internoParte === "disponibilidad") {
+    const lista = esAdmin() ? personas : personas.filter((item) => item.id === sesion.personaId);
+    caja.append(boton("Volver al chat", "suave", () => {
+      internoParte = "sala";
+      ir("chat");
+    }));
+    caja.append(vistaDisponibilidad(lista, disponibilidades, esAdmin()));
+    return;
+  }
+  const colorDe = (persona) => {
+    const estado = disponibilidades.find((item) => item.id === (persona && persona.disponibilidadId));
+    return estado ? estado.color : "";
+  };
+  const cara = (persona, tam) => avatarDe(persona, tam, colorDe(persona));
+  const genteDe = (chat) => (chat.miembros || []).map((id) => personas.find((item) => item.id === id)).filter(Boolean);
+  const app = document.createElement("div");
+  app.className = "chat-app";
+  const lado = document.createElement("div");
+  lado.className = "chat-lado";
+  const perfil = document.createElement("div");
+  perfil.className = "chat-perfil";
+  const propia = personas.find((item) => item.id === chatYo);
+  perfil.append(cara(propia, "lg"));
+  const perfilTexto = document.createElement("div");
+  if (sesion.personaId) {
+    const nombre = document.createElement("b");
+    nombre.textContent = propia ? nombreVisible(propia) : "Tu ficha";
+    const detalle = document.createElement("p");
+    detalle.textContent = propia ? [propia.nombre, propia.cargo].filter(Boolean).join(" · ") : "";
+    perfilTexto.append(nombre, detalle);
+  } else {
+    perfilTexto.append(selectDe(
+      [{ id: "", nombre: "Elige tu ficha" }].concat(personas.map((item) => ({ id: item.id, nombre: etiquetaPersona(item) }))),
+      chatYo,
+      (valor) => {
+        chatYo = valor;
+        try { localStorage.setItem("tavadev-chat-yo", valor); } catch (error) { /* sigue en esta visita */ }
+        pintar();
+      },
+    ));
+  }
+  perfil.append(perfilTexto);
+  const acciones = document.createElement("div");
+  acciones.className = "chat-acciones";
+  acciones.append(
+    boton("Nuevo chat", chatComponer === "directo" ? "primario" : "suave", () => {
+      chatComponer = "directo";
+      chatAbierto = "";
+      pintar();
+    }),
+    boton("Nuevo grupo", chatComponer === "grupo" ? "primario" : "suave", () => {
+      chatComponer = "grupo";
+      chatAbierto = "";
+      pintar();
+    }),
+    boton("Estado", internoParte === "disponibilidad" ? "primario" : "suave", () => {
+      internoParte = internoParte === "disponibilidad" ? "sala" : "disponibilidad";
+      ir("chat");
+    }),
+  );
+  lado.append(perfil, acciones);
+  const lista = document.createElement("div");
+  lista.className = "chat-lista";
+  const ordenados = chats.slice().sort((a, b) => String((b.ultimo && b.ultimo.creadoEn) || b.creadoEn).localeCompare(String((a.ultimo && a.ultimo.creadoEn) || a.creadoEn)));
+  if (!ordenados.length) {
+    const vacio = document.createElement("p");
+    vacio.className = "ayuda";
+    vacio.textContent = "Todavía no hay chats. Empieza uno con una persona o arma un grupo.";
+    lista.append(vacio);
+  }
+  ordenados.forEach((chat) => {
+    const miembros = genteDe(chat);
+    const otro = miembros.find((item) => item.id !== chatYo) || miembros[0];
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "chat-item" + (chat.id === chatAbierto && !chatComponer ? " activa" : "");
+    item.append(chat.tipo === "grupo" ? avatarGrupo(miembros) : cara(otro));
+    const textos = document.createElement("div");
+    textos.className = "textos";
+    const titulo = document.createElement("b");
+    titulo.textContent = tituloDeChat(chat, personas);
+    const previo = document.createElement("span");
+    previo.textContent = chat.ultimo ? ((chat.ultimo.emote || "") + " " + (chat.ultimo.texto || "")).trim() : "Sin mensajes";
+    textos.append(titulo, previo);
+    const hora = document.createElement("time");
+    hora.textContent = chat.ultimo ? horaLista(chat.ultimo.creadoEn) : "";
+    item.append(textos, hora);
+    item.onclick = () => {
+      chatAbierto = chat.id;
+      chatComponer = "";
+      pintar();
+    };
+    lista.append(item);
+  });
+  lado.append(lista);
+  const sala = document.createElement("div");
+  sala.className = "chat-sala";
+  const actual = !chatComponer && chats.find((item) => item.id === chatAbierto);
+  if (chatComponer === "directo") {
+    const cabeza = document.createElement("div");
+    cabeza.className = "chat-cabeza";
+    const textos = document.createElement("div");
+    const h = document.createElement("h2");
+    h.textContent = "Nuevo chat";
+    const p = document.createElement("p");
+    p.textContent = "Elige a alguien del equipo. Si ya hablaron, se abre la misma conversación.";
+    textos.append(h, p);
+    cabeza.append(textos);
+    const gente = document.createElement("div");
+    gente.className = "gente-chat";
+    personas.filter((item) => item.id !== chatYo).forEach((persona) => {
+      const fila = document.createElement("button");
+      fila.type = "button";
+      fila.className = "gente-fila";
+      fila.append(cara(persona, "lg"));
+      const datos = document.createElement("div");
+      const nombre = document.createElement("b");
+      nombre.textContent = nombreVisible(persona);
+      const sub = document.createElement("p");
+      sub.textContent = [persona.nombre !== nombreVisible(persona) ? persona.nombre : "", persona.cargo].filter(Boolean).join(" · ");
+      datos.append(nombre, sub);
+      fila.append(datos);
+      fila.onclick = async () => {
+        if (!chatYo) {
+          toast("Primero elige quién eres");
+          return;
+        }
+        try {
+          const chat = await api("/api/admin/chats", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tipo: "directo", personaIds: [chatYo, persona.id] }),
+          });
+          chatAbierto = chat.id;
+          chatComponer = "";
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      };
+      gente.append(fila);
+    });
+    sala.append(cabeza, gente);
+  } else if (chatComponer === "grupo") {
+    const cabeza = document.createElement("div");
+    cabeza.className = "chat-cabeza";
+    const textos = document.createElement("div");
+    const h = document.createElement("h2");
+    h.textContent = "Nuevo grupo";
+    const p = document.createElement("p");
+    p.textContent = "Ponle nombre y marca a las personas. La misma persona puede estar en varios grupos.";
+    textos.append(h, p);
+    cabeza.append(textos);
+    const nombreGrupo = { valor: "" };
+    const elegidos = new Set();
+    const marcas = document.createElement("div");
+    marcas.className = "gente-chat";
+    personas.forEach((persona) => {
+      const fila = document.createElement("label");
+      fila.className = "gente-fila";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.onchange = () => {
+        if (box.checked) elegidos.add(persona.id);
+        else elegidos.delete(persona.id);
+      };
+      const datos = document.createElement("div");
+      const nombre = document.createElement("b");
+      nombre.textContent = nombreVisible(persona);
+      const sub = document.createElement("p");
+      sub.textContent = persona.cargo || persona.nombre;
+      datos.append(nombre, sub);
+      fila.append(box, cara(persona), datos);
+      marcas.append(fila);
+    });
+    const crear = boton("Crear grupo", "primario", async () => {
+      const ids = [...elegidos];
+      if (chatYo && !ids.includes(chatYo)) ids.push(chatYo);
+      try {
+        const chat = await api("/api/admin/chats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo: "grupo", nombre: nombreGrupo.valor, personaIds: ids }),
+        });
+        chatAbierto = chat.id;
+        chatComponer = "";
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    const alta = document.createElement("div");
+    alta.className = "chat-alta";
+    alta.append(campo("Nombre del grupo", "", (v) => (nombreGrupo.valor = v)), marcas, crear);
+    sala.append(cabeza, alta);
+  } else if (!actual) {
+    const ayuda = document.createElement("p");
+    ayuda.className = "ayuda sala-vacia";
+    ayuda.textContent = "Elige una conversación, o empieza un chat o un grupo.";
+    sala.append(ayuda);
+  } else {
+    const miembros = genteDe(actual);
+    const otros = miembros.filter((item) => item.id !== chatYo);
+    const cabeza = document.createElement("div");
+    cabeza.className = "chat-cabeza";
+    const foco = actual.tipo === "grupo" ? null : (otros[0] || miembros[0]);
+    cabeza.append(actual.tipo === "grupo" ? avatarGrupo(miembros) : cara(foco, "lg"));
+    const textos = document.createElement("div");
+    const h = document.createElement("h2");
+    h.textContent = tituloDeChat(actual, personas);
+    const sub = document.createElement("p");
+    if (actual.tipo === "grupo") {
+      sub.textContent = miembros.map((item) => nombreVisible(item)).join(", ");
+    } else if (foco) {
+      sub.textContent = [foco.nombre, foco.cargo].filter(Boolean).join(" · ");
+    }
+    textos.append(h, sub);
+    cabeza.append(textos);
+    if (actual.tipo === "directo" && foco) {
+      const apodo = { valor: foco.apodo || "" };
+      const linea = document.createElement("div");
+      linea.className = "apodo-linea";
+      linea.append(campo("Apodo", foco.apodo || "", (v) => (apodo.valor = v)), boton("Guardar", "suave", async () => {
+        try {
+          await publicarPersona({ ...foco, apodo: apodo.valor });
+          toast("Apodo guardado");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+      cabeza.append(linea);
+    }
+    if (actual.tipo === "grupo") {
+      const nombre = { valor: actual.nombre || "" };
+      const linea = document.createElement("div");
+      linea.className = "apodo-linea";
+      linea.append(campo("Nombre", actual.nombre || "", (v) => (nombre.valor = v)), boton("Guardar", "suave", async () => {
+        try {
+          await api("/api/admin/chats/" + encodeURIComponent(actual.id), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nombre: nombre.valor }),
+          });
+          toast("Nombre del grupo guardado");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+      cabeza.append(linea);
+    }
+    const hilo = document.createElement("div");
+    hilo.className = "hilo";
+    hilo.dataset.hilo = "1";
+    const mensajes = await api("/api/admin/mensajes?chat=" + encodeURIComponent(actual.id));
+    pintarHilo(hilo, mensajes);
+    let extra = null;
+    if (actual.tipo === "grupo") {
+      const fuera = personas.filter((item) => !actual.miembros.includes(item.id));
+      if (fuera.length) {
+        let sumar = "";
+        extra = document.createElement("div");
+        extra.className = "chat-sumar";
+        extra.append(
+          selectDe([{ id: "", nombre: "Agregar a alguien más" }].concat(fuera.map((item) => ({ id: item.id, nombre: etiquetaPersona(item) }))), "", (v) => (sumar = v)),
+          boton("Agregar", "suave", async () => {
+            if (!sumar) return;
+            try {
+              await api("/api/admin/chats/" + encodeURIComponent(actual.id) + "/miembros", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ personaId: sumar }),
+              });
+              pintar();
+            } catch (error) {
+              toast(error.message);
+            }
+          }),
+        );
+      }
+    }
+    const emotes = document.createElement("div");
+    emotes.className = "emotes";
+    emotes.hidden = true;
+    const entrada = document.createElement("input");
+    entrada.placeholder = chatYo ? "Escribe un mensaje" : "Primero elige quién eres";
+    entrada.disabled = !chatYo || !actual.miembros.includes(chatYo);
+    async function enviar(texto, emote) {
+      if (!chatYo) {
+        toast("Elige quién eres");
+        return;
+      }
+      try {
+        await api("/api/admin/mensajes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId: actual.id, personaId: chatYo, texto, emote: emote || "" }),
+        });
+        entrada.value = "";
+        await refrescarMensajes();
+      } catch (error) {
+        toast(error.message);
+      }
+    }
+    EMOTES.forEach((signo) => {
+      const signoBtn = document.createElement("button");
+      signoBtn.type = "button";
+      signoBtn.textContent = signo;
+      signoBtn.onclick = () => {
+        if (entrada.value.trim()) {
+          entrada.value += signo;
+          entrada.focus();
+          return;
+        }
+        enviar("", signo);
+      };
+      emotes.append(signoBtn);
+    });
+    const emoji = document.createElement("button");
+    emoji.type = "button";
+    emoji.className = "icono";
+    emoji.textContent = "😊";
+    emoji.onclick = () => { emotes.hidden = !emotes.hidden; };
+    const enviarBtn = document.createElement("button");
+    enviarBtn.type = "button";
+    enviarBtn.className = "primario";
+    enviarBtn.textContent = "Enviar";
+    enviarBtn.disabled = entrada.disabled;
+    enviarBtn.onclick = () => enviar(entrada.value, "");
+    entrada.addEventListener("keydown", (evento) => {
+      if (evento.key === "Enter") enviar(entrada.value, "");
+    });
+    const pie = document.createElement("div");
+    pie.className = "composer";
+    pie.append(emoji, entrada, enviarBtn);
+    sala.append(cabeza);
+    if (extra) sala.append(extra);
+    sala.append(hilo, emotes, pie);
+    reloj = setInterval(refrescarMensajes, 4000);
+  }
+  app.append(lado, sala);
+  caja.append(app);
+}
+
+function vistaDisponibilidad(personas, disponibilidades, editarCatalogo) {
+  const puede = editarCatalogo !== false;
+  const card = tarjeta("Disponibilidad", puede ? "Cada persona puede tener un estado. Si falta uno, escríbelo y agrégalo." : "Marca cómo estás hoy. El apodo es como te ven en el chat.");
+  const nuevo = { nombre: "", color: "#7B5FD1" };
+  const alta = document.createElement("div");
+  alta.className = "fila";
+  const agregar = document.createElement("button");
+  agregar.type = "button";
+  agregar.className = "primario";
+  agregar.textContent = "Agregar estado";
+  agregar.onclick = async () => {
+    try {
+      await api("/api/admin/disponibilidades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nuevo),
+      });
+      toast("Estado agregado");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
+  alta.append(campo("Nombre", "", (v) => (nuevo.nombre = v)), campo("Color", nuevo.color, (v) => (nuevo.color = v), "color"), agregar);
+  if (puede) card.append(alta);
+  disponibilidades.forEach((estado) => {
+    const fila = document.createElement("div");
+    fila.className = "liga";
+    const nombre = document.createElement("strong");
+    const punto = document.createElement("i");
+    punto.className = "punto-disp";
+    punto.style.background = estado.color;
+    nombre.append(punto, document.createTextNode(" " + estado.nombre));
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "suave";
+    quitar.textContent = "Quitar";
+    quitar.onclick = async () => {
+      await api("/api/admin/disponibilidades/" + encodeURIComponent(estado.id), { method: "DELETE" });
+      pintar();
+    };
+    fila.append(nombre, document.createElement("span"));
+    if (puede) fila.append(quitar);
+    card.append(fila);
+  });
+  const gente = tarjeta("Personas", "El apodo es como la ves en el chat. El nombre del organigrama no cambia.");
+  personas.forEach((persona) => {
+    const fila = document.createElement("div");
+    fila.className = "persona-chat";
+    const estado = disponibilidades.find((item) => item.id === persona.disponibilidadId);
+    const punto = document.createElement("i");
+    punto.className = "punto-disp";
+    punto.style.background = estado ? estado.color : "#d9cff5";
+    const nombre = document.createElement("strong");
+    nombre.textContent = etiquetaPersona(persona);
+    const elegir = selectDe(
+      [{ id: "", nombre: "Sin estado" }].concat(disponibilidades.map((item) => ({ id: item.id, nombre: item.nombre }))),
+      persona.disponibilidadId || "",
+      async (valor) => {
+        try {
+          await publicarPersona({ ...persona, disponibilidadId: valor });
+          toast("Disponibilidad actualizada");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      },
+    );
+    const apodo = { valor: persona.apodo || "" };
+    const guardar = document.createElement("button");
+    guardar.type = "button";
+    guardar.className = "suave";
+    guardar.textContent = "Apodo";
+    guardar.onclick = async () => {
+      try {
+        await publicarPersona({ ...persona, apodo: apodo.valor });
+        toast("Apodo guardado");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    fila.append(punto, nombre, elegir, campo("Apodo", persona.apodo || "", (v) => (apodo.valor = v)), guardar);
+    gente.append(fila);
+  });
+  const caja = document.createElement("div");
+  caja.append(card, gente);
+  return caja;
+}
+
+const TIPOS_TAREA = [
+  { id: "historia", nombre: "Historia" },
+  { id: "tarea", nombre: "Tarea" },
+  { id: "error", nombre: "Error" },
+];
+const PRIORIDADES = [
+  { id: "baja", nombre: "Baja" },
+  { id: "media", nombre: "Media" },
+  { id: "alta", nombre: "Alta" },
+  { id: "urgente", nombre: "Urgente" },
+];
+const NOMBRE_SPRINT = { planificado: "Planificado", activo: "Activo", cerrado: "Cerrado" };
+let epicaEnEdicion = null;
+let sprintEnEdicion = null;
+
+function boton(texto, clase, accion) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = clase;
+  btn.textContent = texto;
+  btn.onclick = accion;
+  return btn;
+}
+
+async function enviarJson(url, cuerpo, metodo) {
+  return api(url, {
+    method: metodo || "POST",
+    headers: { "Content-Type": "application/json" },
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+  });
+}
+
+function nombrePersona(personas, id) {
+  const persona = (personas || []).find((item) => item.id === id);
+  return persona ? nombreVisible(persona) : "";
+}
+
+function corteDe(sprints) {
+  if (sprintVista === "todo" || sprintVista === "backlog") return sprintVista;
+  if (sprintVista && sprints.some((item) => item.id === sprintVista)) return sprintVista;
+  const activo = sprints.find((item) => item.estado === "activo");
+  return activo ? activo.id : "backlog";
+}
+
+function tareasVisibles(tareas, corte) {
+  return tareas.filter((item) => {
+    if (corte === "todo") return true;
+    if (corte === "backlog") return !item.sprintId;
+    return item.sprintId === corte;
+  }).filter((item) => !epicaFiltro || item.epicaId === epicaFiltro)
+    .filter((item) => !personaFiltro || item.personaId === personaFiltro)
+    .sort((a, b) => a.orden - b.orden || a.titulo.localeCompare(b.titulo, "es"));
+}
+
+function fichaTarea(data, corte) {
+  const actual = data.tareas.find((item) => item.id === tareaAbierta);
+  if (tareaAbierta && tareaAbierta !== "nueva" && !actual) {
+    tareaAbierta = "";
+    return document.createElement("div");
+  }
+  const inicial = (data.estados.find((item) => item.esInicial) || data.estados[0] || {}).id || "";
+  const base = actual
+    ? { ...actual, puntos: actual.puntos == null ? "" : String(actual.puntos) }
+    : {
+      titulo: "",
+      detalle: "",
+      criterio: "",
+      tipo: "tarea",
+      prioridad: "media",
+      puntos: "",
+      epicaId: epicaFiltro || "",
+      sprintId: corte === "todo" || corte === "backlog" ? "" : corte,
+      estadoId: inicial,
+      personaId: sesion.personaId || "",
+    };
+  const card = tarjeta(actual ? "Tarea" : "Nueva tarea", "Historia, tarea y error ya vienen definidos. La prioridad también. Arrastrar la tarjeta cambia la columna.");
+  card.append(campo("Título", base.titulo, (v) => (base.titulo = v)));
+  card.append(campo("Detalle", base.detalle, (v) => (base.detalle = v), "area"));
+  card.append(campo("Cómo sabemos que quedó lista", base.criterio, (v) => (base.criterio = v), "area"));
+  const rejilla = document.createElement("div");
+  rejilla.className = "rejilla";
+  rejilla.append(
+    elegir("Tipo", TIPOS_TAREA, base.tipo, (v) => (base.tipo = v)),
+    elegir("Prioridad", PRIORIDADES, base.prioridad, (v) => (base.prioridad = v)),
+    elegir("Estado", data.estados.map((item) => ({ id: item.id, nombre: item.nombre })), base.estadoId, (v) => (base.estadoId = v)),
+    elegir("Sprint", [{ id: "", nombre: "Backlog" }].concat(data.sprints.map((item) => ({ id: item.id, nombre: item.nombre }))), base.sprintId, (v) => (base.sprintId = v)),
+    elegir("Épica", [{ id: "", nombre: "Sin épica" }].concat(data.epicas.map((item) => ({ id: item.id, nombre: item.nombre }))), base.epicaId, (v) => (base.epicaId = v)),
+    elegir("Responsable", [{ id: "", nombre: "Sin asignar" }].concat(data.personas.map((item) => ({ id: item.id, nombre: etiquetaPersona(item) }))), base.personaId, (v) => (base.personaId = v)),
+    campo("Puntos", base.puntos, (v) => (base.puntos = v), "number"),
+  );
+  card.append(rejilla);
+  const acciones = document.createElement("div");
+  acciones.className = "fila";
+  acciones.append(boton("Guardar", "primario", async () => {
+    try {
+      const guardada = await enviarJson("/api/admin/tareas", {
+        ...base,
+        id: actual ? actual.id : undefined,
+        puntos: base.puntos === "" || base.puntos == null ? null : Number(base.puntos),
+      });
+      tareaAbierta = guardada.id;
+      toast("Tarea guardada");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  }));
+  acciones.append(boton("Cerrar", "suave", () => {
+    tareaAbierta = "";
+    pintar();
+  }));
+  if (actual) {
+    acciones.append(boton("Quitar", "peligro", async () => {
+      try {
+        await api("/api/admin/tareas/" + encodeURIComponent(actual.id), { method: "DELETE" });
+        tareaAbierta = "";
+        toast("Tarea quitada");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+  }
+  card.append(acciones);
+  if (!actual) return card;
+  const notas = data.notas.filter((item) => item.tareaId === actual.id);
+  const bloque = document.createElement("div");
+  const tituloNotas = document.createElement("h3");
+  tituloNotas.textContent = "Notas";
+  bloque.append(tituloNotas);
+  if (!notas.length) {
+    const vacio = document.createElement("p");
+    vacio.className = "ayuda";
+    vacio.textContent = "Todavía no hay notas.";
+    bloque.append(vacio);
+  }
+  notas.forEach((nota) => {
+    const fila = document.createElement("div");
+    fila.className = "nota-item";
+    const quien = document.createElement("strong");
+    quien.textContent = nombrePersona(data.personas, nota.personaId) || "Administración";
+    const texto = document.createElement("p");
+    texto.textContent = nota.texto;
+    const cuando = document.createElement("span");
+    cuando.className = "ayuda";
+    cuando.textContent = horaCorta(nota.creadoEn);
+    fila.append(quien, texto, cuando);
+    if (esAdmin() || nota.personaId === sesion.personaId) {
+      fila.append(boton("Quitar", "suave", async () => {
+        try {
+          await api("/api/admin/notas/" + encodeURIComponent(nota.id), { method: "DELETE" });
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
+    bloque.append(fila);
+  });
+  const nueva = { texto: "" };
+  const alta = document.createElement("div");
+  alta.className = "fila";
+  alta.append(campo("Nota", "", (v) => (nueva.texto = v), "area"), boton("Anotar", "primario", async () => {
+    try {
+      await enviarJson("/api/admin/notas", { tareaId: actual.id, personaId: sesion.personaId || "", texto: nueva.texto });
+      toast("Nota guardada");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  }));
+  bloque.append(alta);
+  card.append(bloque);
+  return card;
+}
+
+function tarjetaDeTarea(tarea, data) {
+  const epica = data.epicas.find((item) => item.id === tarea.epicaId);
+  const card = document.createElement("article");
+  card.className = "tarea-card";
+  card.draggable = true;
+  card.dataset.tarea = tarea.id;
+  card.title = "Arrastra a otra columna";
+  card.style.borderLeftColor = epica ? epica.color : "#B9A3F2";
+  card.addEventListener("dragstart", (evento) => {
+    arrastrando = true;
+    card.classList.add("arrastrando");
+    evento.dataTransfer.setData("text/plain", tarea.id);
+    evento.dataTransfer.effectAllowed = "move";
+  });
+  card.addEventListener("dragend", () => {
+    card.classList.remove("arrastrando");
+    setTimeout(() => { arrastrando = false; }, 0);
+  });
+  card.addEventListener("click", () => {
+    if (arrastrando) return;
+    tareaAbierta = tarea.id;
+    pintar();
+  });
+  const tipo = document.createElement("span");
+  tipo.className = "tipo-tarea";
+  const prioridad = PRIORIDADES.find((item) => item.id === tarea.prioridad);
+  tipo.textContent = (TIPOS_TAREA.find((item) => item.id === tarea.tipo) || TIPOS_TAREA[1]).nombre;
+  const punto = document.createElement("i");
+  punto.className = "punto-disp";
+  punto.style.background = { baja: "#B9A3F2", media: "#7B5FD1", alta: "#E57FB8", urgente: "#9D2F4A" }[tarea.prioridad] || "#7B5FD1";
+  punto.title = prioridad ? prioridad.nombre : "";
+  const cabeza = document.createElement("div");
+  cabeza.className = "fila";
+  cabeza.append(tipo, punto);
+  const titulo = document.createElement("b");
+  titulo.textContent = tarea.titulo;
+  card.append(cabeza, titulo);
+  const meta = [epica ? epica.nombre : "", nombrePersona(data.personas, tarea.personaId), tarea.puntos == null ? "" : tarea.puntos + " pts"].filter(Boolean);
+  if (meta.length) {
+    const p = document.createElement("p");
+    p.textContent = meta.join(" · ");
+    card.append(p);
+  }
+  return card;
+}
+
+function vistaTablero(data) {
+  const corte = corteDe(data.sprints);
+  const envoltorio = document.createElement("div");
+  const ayuda = document.createElement("p");
+  ayuda.className = "ayuda";
+  ayuda.textContent = "Arrastra una tarjeta a otra columna para cambiarle el estado. El backlog es lo que todavía no entra a un sprint.";
+  const filtros = document.createElement("div");
+  filtros.className = "rejilla";
+  const opcionesSprint = [{ id: "todo", nombre: "Todo el trabajo" }, { id: "backlog", nombre: "Backlog" }].concat(data.sprints.map((item) => ({
+    id: item.id,
+    nombre: item.nombre + (item.estado === "activo" ? " · activo" : ""),
+  })));
+  filtros.append(
+    elegir("Vista", opcionesSprint, corte, (valor) => { sprintVista = valor; pintar(); }),
+    elegir("Épica", [{ id: "", nombre: "Todas" }].concat(data.epicas.map((item) => ({ id: item.id, nombre: item.nombre }))), epicaFiltro, (valor) => { epicaFiltro = valor; pintar(); }),
+    elegir("Persona", [{ id: "", nombre: "Todas" }].concat(data.personas.map((item) => ({ id: item.id, nombre: etiquetaPersona(item) }))), personaFiltro, (valor) => { personaFiltro = valor; pintar(); }),
+  );
+  const acciones = document.createElement("div");
+  acciones.className = "fila";
+  acciones.append(boton("Nueva tarea", "primario", () => { tareaAbierta = "nueva"; pintar(); }));
+  const tablero = document.createElement("div");
+  tablero.className = "tablero";
+  const visibles = tareasVisibles(data.tareas, corte);
+  data.estados.forEach((estado) => {
+    const col = document.createElement("section");
+    col.className = "columna";
+    const h = document.createElement("h3");
+    const nombre = document.createElement("span");
+    nombre.textContent = estado.nombre;
+    const cuenta = document.createElement("span");
+    const deColumna = visibles.filter((item) => item.estadoId === estado.id);
+    cuenta.textContent = String(deColumna.length);
+    h.append(nombre, cuenta);
+    const punto = document.createElement("i");
+    punto.className = "punto-disp";
+    punto.style.background = estado.color;
+    nombre.prepend(punto, document.createTextNode(" "));
+    col.append(h);
+    if (!deColumna.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "ayuda";
+      vacio.textContent = "Suelta aquí";
+      col.append(vacio);
+    }
+    deColumna.forEach((tarea) => col.append(tarjetaDeTarea(tarea, data)));
+    col.addEventListener("dragover", (evento) => {
+      evento.preventDefault();
+      col.classList.add("sobre");
+    });
+    col.addEventListener("dragleave", () => col.classList.remove("sobre"));
+    col.addEventListener("drop", async (evento) => {
+      evento.preventDefault();
+      col.classList.remove("sobre");
+      const id = evento.dataTransfer.getData("text/plain");
+      if (!id) return;
+      const antes = evento.target.closest("[data-tarea]");
+      const ids = deColumna.filter((item) => item.id !== id).map((item) => item.id);
+      const en = antes ? ids.indexOf(antes.dataset.tarea) : -1;
+      ids.splice(en < 0 ? ids.length : en, 0, id);
+      try {
+        await enviarJson("/api/admin/tareas/orden", { estadoId: estado.id, ids });
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    tablero.append(col);
+  });
+  envoltorio.append(ayuda, filtros, acciones);
+  const plan = document.createElement("div");
+  plan.className = "plan" + (tareaAbierta ? "" : " sin-ficha");
+  plan.append(tablero);
+  if (tareaAbierta) plan.append(fichaTarea(data, corte));
+  envoltorio.append(plan);
+  return envoltorio;
+}
+
+function vistaBacklog(data) {
+  const card = tarjeta("Backlog", "Estas tareas todavía no están en un sprint. Elige un sprint para meterlas.");
+  const sueltas = data.tareas.filter((item) => !item.sprintId).sort((a, b) => a.orden - b.orden || a.titulo.localeCompare(b.titulo, "es"));
+  if (!sueltas.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "El backlog está vacío.";
+    card.append(p);
+  }
+  sueltas.forEach((tarea) => {
+    const fila = document.createElement("div");
+    fila.className = "liga";
+    const nombre = document.createElement("strong");
+    nombre.textContent = tarea.titulo;
+    nombre.style.cursor = "pointer";
+    nombre.onclick = () => { tareaAbierta = tarea.id; actividadParte = "tablero"; sprintVista = "backlog"; pintar(); };
+    const meta = document.createElement("span");
+    const epica = data.epicas.find((item) => item.id === tarea.epicaId);
+    const tipo = TIPOS_TAREA.find((item) => item.id === tarea.tipo) || TIPOS_TAREA[1];
+    meta.textContent = [tipo.nombre, epica ? epica.nombre : "", nombrePersona(data.personas, tarea.personaId)].filter(Boolean).join(" · ");
+    const meter = selectDe([{ id: "", nombre: "A un sprint…" }].concat(data.sprints.map((item) => ({ id: item.id, nombre: item.nombre }))), "", async (valor) => {
+      if (!valor) return;
+      try {
+        await enviarJson("/api/admin/tareas", { ...tarea, sprintId: valor });
+        toast("Entró al sprint");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    });
+    fila.append(nombre, meta, meter);
+    card.append(fila);
+  });
+  card.append(boton("Nueva tarea en el backlog", "primario", () => {
+    tareaAbierta = "nueva";
+    sprintVista = "backlog";
+    actividadParte = "tablero";
+    pintar();
+  }));
+  return card;
+}
+
+function vistaEpicas(data) {
+  const caja = document.createElement("div");
+  const base = epicaEnEdicion ? { ...epicaEnEdicion } : { nombre: "", resumen: "", color: "#7B5FD1", estado: "abierta" };
+  const form = tarjeta(epicaEnEdicion ? "Editar épica" : "Nueva épica", "Una épica agrupa varias tareas de un mismo esfuerzo. Por ejemplo: temporada, web o gira.");
+  form.append(campo("Nombre", base.nombre, (v) => (base.nombre = v)));
+  form.append(campo("Contexto", base.resumen, (v) => (base.resumen = v), "area"));
+  form.append(campo("Color", base.color, (v) => (base.color = v), "color"));
+  const acciones = document.createElement("div");
+  acciones.className = "fila";
+  acciones.append(boton("Guardar", "primario", async () => {
+    try {
+      await enviarJson("/api/admin/epicas", { ...base, id: epicaEnEdicion ? epicaEnEdicion.id : undefined });
+      epicaEnEdicion = null;
+      toast("Épica guardada");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  }));
+  if (epicaEnEdicion) {
+    acciones.append(boton("Cancelar", "suave", () => { epicaEnEdicion = null; pintar(); }));
+  }
+  form.append(acciones);
+  const lista = tarjeta("Épicas");
+  if (!data.epicas.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Todavía no hay épicas.";
+    lista.append(p);
+  }
+  data.epicas.forEach((epica) => {
+    const fila = document.createElement("div");
+    fila.className = "liga";
+    const nombre = document.createElement("strong");
+    const punto = document.createElement("i");
+    punto.className = "punto-disp";
+    punto.style.background = epica.color;
+    nombre.append(punto, document.createTextNode(" " + epica.nombre));
+    const meta = document.createElement("span");
+    const cuantas = data.tareas.filter((item) => item.epicaId === epica.id).length;
+    meta.textContent = (epica.estado === "cerrada" ? "Cerrada" : "Abierta") + " · " + cuantas + (cuantas === 1 ? " tarea" : " tareas");
+    const controles = document.createElement("div");
+    controles.className = "fila";
+    controles.append(boton("Editar", "suave", () => { epicaEnEdicion = epica; pintar(); }));
+    controles.append(boton(epica.estado === "cerrada" ? "Abrir" : "Cerrar", "suave", async () => {
+      try {
+        await enviarJson("/api/admin/epicas", { ...epica, estado: epica.estado === "cerrada" ? "abierta" : "cerrada" });
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+    if (esAdmin()) {
+      controles.append(boton("Quitar", "peligro", async () => {
+        try {
+          await api("/api/admin/epicas/" + encodeURIComponent(epica.id), { method: "DELETE" });
+          if (epicaEnEdicion && epicaEnEdicion.id === epica.id) epicaEnEdicion = null;
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
+    fila.append(nombre, meta, controles);
+    if (epica.resumen) {
+      const resumen = document.createElement("p");
+      resumen.className = "ayuda";
+      resumen.textContent = epica.resumen;
+      lista.append(fila, resumen);
+    } else lista.append(fila);
+  });
+  caja.append(form, lista);
+  return caja;
+}
+
+function vistaSprints(data) {
+  const caja = document.createElement("div");
+  const base = sprintEnEdicion
+    ? { ...sprintEnEdicion }
+    : { nombre: "", meta: "", inicio: "", fin: "", estado: "planificado" };
+  const form = tarjeta(sprintEnEdicion ? "Editar sprint" : "Nuevo sprint", "Un sprint es un tramo con fecha. Solo uno queda activo: al activar otro, el anterior vuelve a planificado.");
+  form.append(campo("Nombre", base.nombre, (v) => (base.nombre = v)));
+  form.append(campo("Meta", base.meta, (v) => (base.meta = v), "area"));
+  const fechas = document.createElement("div");
+  fechas.className = "rejilla";
+  fechas.append(campo("Inicio", base.inicio, (v) => (base.inicio = v), "date"), campo("Fin", base.fin, (v) => (base.fin = v), "date"));
+  form.append(fechas);
+  form.append(elegir("Estado", [
+    { id: "planificado", nombre: "Planificado" },
+    { id: "activo", nombre: "Activo" },
+    { id: "cerrado", nombre: "Cerrado" },
+  ], base.estado, (v) => (base.estado = v)));
+  const acciones = document.createElement("div");
+  acciones.className = "fila";
+  acciones.append(boton("Guardar", "primario", async () => {
+    try {
+      await enviarJson("/api/admin/sprints", { ...base, id: sprintEnEdicion ? sprintEnEdicion.id : undefined });
+      sprintEnEdicion = null;
+      toast("Sprint guardado");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  }));
+  if (sprintEnEdicion) acciones.append(boton("Cancelar", "suave", () => { sprintEnEdicion = null; pintar(); }));
+  form.append(acciones);
+  const lista = tarjeta("Sprints");
+  if (!data.sprints.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Todavía no hay sprints. El tablero muestra el backlog hasta que actives uno.";
+    lista.append(p);
+  }
+  data.sprints.forEach((sprint) => {
+    const fila = document.createElement("div");
+    fila.className = "liga";
+    const nombre = document.createElement("strong");
+    nombre.textContent = sprint.nombre;
+    const meta = document.createElement("span");
+    const cuantas = data.tareas.filter((item) => item.sprintId === sprint.id).length;
+    const fechasTxt = [sprint.inicio, sprint.fin].filter(Boolean).join(" – ");
+    meta.textContent = [NOMBRE_SPRINT[sprint.estado] || sprint.estado, fechasTxt, cuantas + (cuantas === 1 ? " tarea" : " tareas"), sprint.meta].filter(Boolean).join(" · ");
+    const controles = document.createElement("div");
+    controles.className = "fila";
+    controles.append(boton("Editar", "suave", () => { sprintEnEdicion = sprint; pintar(); }));
+    if (sprint.estado !== "activo") {
+      controles.append(boton("Activar", "primario", async () => {
+        try {
+          await enviarJson("/api/admin/sprints", { ...sprint, estado: "activo" });
+          sprintVista = sprint.id;
+          toast("Sprint activo");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
+    if (sprint.estado !== "cerrado") {
+      controles.append(boton("Cerrar", "suave", async () => {
+        try {
+          await enviarJson("/api/admin/sprints", { ...sprint, estado: "cerrado" });
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
+    if (esAdmin()) {
+      controles.append(boton("Quitar", "peligro", async () => {
+        try {
+          await api("/api/admin/sprints/" + encodeURIComponent(sprint.id), { method: "DELETE" });
+          if (sprintEnEdicion && sprintEnEdicion.id === sprint.id) sprintEnEdicion = null;
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
+    fila.append(nombre, meta, controles);
+    lista.append(fila);
+  });
+  caja.append(form, lista);
+  return caja;
+}
+
+function vistaEstadosActividad(data) {
+  const card = tarjeta("Estados", "Estas columnas salen listas: Por hacer, En curso, En revisión y Listo. Puedes agregar otras y cambiar el orden. El orden es el orden del tablero.");
+  const nuevo = { nombre: "", color: "#7B5FD1" };
+  const alta = document.createElement("div");
+  alta.className = "fila";
+  alta.append(campo("Nombre", "", (v) => (nuevo.nombre = v)), campo("Color", nuevo.color, (v) => (nuevo.color = v), "color"), boton("Agregar", "primario", async () => {
+    try {
+      await enviarJson("/api/admin/actividad-estados", nuevo);
+      toast("Estado agregado");
+      pintar();
+    } catch (error) {
+      toast(error.message);
+    }
+  }));
+  card.append(alta);
+  data.estados.forEach((estado, indice) => {
+    const fila = document.createElement("div");
+    fila.className = "liga";
+    const edicion = { nombre: estado.nombre, color: estado.color };
+    const nombre = campo("Nombre", estado.nombre, (v) => (edicion.nombre = v));
+    const color = campo("Color", estado.color, (v) => (edicion.color = v), "color");
+    const controles = document.createElement("div");
+    controles.className = "fila";
+    controles.append(boton("Guardar", "suave", async () => {
+      try {
+        await enviarJson("/api/admin/actividad-estados", { ...estado, ...edicion });
+        toast("Estado guardado");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+    if (indice > 0) {
+      controles.append(boton("Subir", "suave", async () => {
+        await enviarJson("/api/admin/actividad-estados/" + encodeURIComponent(estado.id) + "/mover", { delta: -1 });
+        pintar();
+      }));
+    }
+    if (indice < data.estados.length - 1) {
+      controles.append(boton("Bajar", "suave", async () => {
+        await enviarJson("/api/admin/actividad-estados/" + encodeURIComponent(estado.id) + "/mover", { delta: 1 });
+        pintar();
+      }));
+    }
+    if (esAdmin()) {
+      controles.append(boton("Quitar", "peligro", async () => {
+        try {
+          await api("/api/admin/actividad-estados/" + encodeURIComponent(estado.id), { method: "DELETE" });
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
+    fila.append(nombre, color, controles);
+    card.append(fila);
+  });
+  return card;
+}
+
+async function pintarActividades() {
+  if (reloj) clearInterval(reloj);
+  reloj = null;
+  vistaEl.innerHTML = "";
+  vistaEl.append(subnav([
+    ["tablero", "Tablero"],
+    ["backlog", "Backlog"],
+    ["epicas", "Épicas"],
+    ["sprints", "Sprints"],
+    ["estados", "Estados"],
+  ], actividadParte, (id) => {
+    actividadParte = id;
+    ir("actividades");
+  }));
+  const caja = document.createElement("div");
+  vistaEl.append(caja);
+  caja.className = "ayuda";
+  caja.textContent = "Cargando…";
+  const data = await api("/api/admin/tablero");
+  caja.className = "";
+  caja.textContent = "";
+  if (actividadParte === "backlog") caja.append(vistaBacklog(data));
+  else if (actividadParte === "epicas") caja.append(vistaEpicas(data));
+  else if (actividadParte === "sprints") caja.append(vistaSprints(data));
+  else if (actividadParte === "estados") caja.append(vistaEstadosActividad(data));
+  else caja.append(vistaTablero(data));
+}
+
+async function pintarUsuarios() {
+  vistaEl.innerHTML = "";
+  if (!esAdmin()) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Esta parte es para quien administra el panel.";
+    vistaEl.append(p);
+    return;
+  }
+  const caja = document.createElement("div");
+  vistaEl.append(caja);
+  caja.className = "ayuda";
+  caja.textContent = "Cargando…";
+  const [personas, usuarios] = await Promise.all([api("/api/admin/personas"), api("/api/admin/usuarios")]);
+  caja.className = "";
+  caja.textContent = "";
+  const libres = personas.filter((item) => !usuarios.some((cuenta) => cuenta.personaId === item.id));
+  const form = tarjeta("Nuevo usuario", "El usuario se cuelga de una persona del equipo. En el chat escribe con esa ficha. Quien entra con la contraseña general deja el usuario vacío y ve todo.");
+  if (!personas.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Primero crea las personas en Equipo. Después vuelves aquí y les abres el acceso.";
+    form.append(p);
+  } else if (!libres.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Todas las personas ya tienen usuario.";
+    form.append(p);
+  } else {
+    const alta = { personaId: libres[0].id, usuario: "", clave: "", papel: "equipo" };
+    form.append(elegir("Persona", libres.map((item) => ({ id: item.id, nombre: etiquetaPersona(item) })), alta.personaId, (v) => (alta.personaId = v)));
+    form.append(campo("Usuario", "", (v) => (alta.usuario = v)));
+    form.append(campo("Contraseña", "", (v) => (alta.clave = v), "password"));
+    form.append(elegir("Papel", [{ id: "equipo", nombre: "Equipo: chat y tablero" }, { id: "admin", nombre: "Administra: todo el panel" }], alta.papel, (v) => (alta.papel = v)));
+    form.append(boton("Crear usuario", "primario", async () => {
+      try {
+        await enviarJson("/api/admin/usuarios", alta);
+        toast("Usuario creado");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+  }
+  const lista = tarjeta("Usuarios");
+  if (!usuarios.length) {
+    const p = document.createElement("p");
+    p.className = "ayuda";
+    p.textContent = "Todavía no hay usuarios.";
+    lista.append(p);
+  }
+  usuarios.forEach((cuenta) => {
+    const fila = document.createElement("div");
+    fila.className = "cota";
+    const nombre = document.createElement("strong");
+    nombre.textContent = (cuenta.nombre || "Sin ficha") + " · " + cuenta.usuario;
+    const meta = document.createElement("p");
+    meta.className = "ayuda";
+    meta.textContent = (cuenta.papel === "admin" ? "Administra el panel" : "Chat y tablero") + (cuenta.activo ? "" : " · en pausa") + (cuenta.cargo ? " · " + cuenta.cargo : "");
+    const controles = document.createElement("div");
+    controles.className = "fila";
+    controles.append(elegir("Papel", [{ id: "equipo", nombre: "Equipo" }, { id: "admin", nombre: "Administra" }], cuenta.papel, async (valor) => {
+      try {
+        await enviarJson("/api/admin/usuarios", { ...cuenta, papel: valor });
+        toast("Papel actualizado");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+    const clave = { valor: "" };
+    controles.append(campo("Nueva contraseña", "", (v) => (clave.valor = v), "password"));
+    controles.append(boton("Cambiar clave", "suave", async () => {
+      if (String(clave.valor || "").length < 6) {
+        toast("La contraseña necesita al menos 6 caracteres");
+        return;
+      }
+      try {
+        await enviarJson("/api/admin/usuarios", { ...cuenta, clave: clave.valor });
+        toast("Contraseña actualizada");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+    controles.append(boton(cuenta.activo ? "Pausar" : "Activar", "suave", async () => {
+      try {
+        await enviarJson("/api/admin/usuarios", { ...cuenta, activo: !cuenta.activo });
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+    controles.append(boton("Quitar acceso", "peligro", async () => {
+      try {
+        await api("/api/admin/usuarios/" + encodeURIComponent(cuenta.id), { method: "DELETE" });
+        toast("Acceso quitado");
+        pintar();
+      } catch (error) {
+        toast(error.message);
+      }
+    }));
+    fila.append(nombre, meta, controles);
+    lista.append(fila);
+  });
+  caja.append(form, lista);
+}
+
 async function pintar() {
   pintarNav();
   try {
     if (vista === "resumen") return await pintarResumen();
-    if (vista === "pagina") return pintarPagina();
-    if (vista === "apariencia") return pintarApariencia();
+    if (vista === "pagina" || vista === "apariencia") return pintarPagina();
     if (vista === "chatbot") return await pintarChatbot();
     if (vista === "clientes") return await pintarClientes();
     if (vista === "pedidos") return await pintarPedidos();
     if (vista === "equipo") return await pintarEquipo();
+    if (vista === "chat") return await pintarChat();
+    if (vista === "actividades") return await pintarActividades();
+    if (vista === "usuarios") return await pintarUsuarios();
   } catch (error) {
     vistaEl.innerHTML = "";
     const p = document.createElement("p");
@@ -1842,7 +3506,12 @@ document.getElementById("salir").onclick = async () => {
   location.href = "/panel";
 };
 
-api("/api/admin/sitio")
+api("/api/admin/sesion")
+  .then((data) => {
+    sesion = data;
+    aplicarSesion();
+    return api("/api/admin/sitio");
+  })
   .then((data) => {
     sitio = data;
     return pintar();

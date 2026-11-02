@@ -36,28 +36,48 @@ function mismaClave(dada) {
   return crypto.timingSafeEqual(a, b);
 }
 
-function firmaDe(expira) {
-  return crypto.createHmac("sha256", clavePanel() || "tavadev").update(String(expira)).digest("hex");
+function firmaDe(cuerpo) {
+  return crypto.createHmac("sha256", clavePanel() || "tavadev").update(String(cuerpo)).digest("hex");
 }
 
-function cookiePanel(req) {
-  if (!clavePanel()) return false;
+function leerMarca(req) {
+  if (!clavePanel()) return null;
   const trozo = String(req.headers.cookie || "")
     .split(";")
     .map((parte) => parte.trim())
     .find((parte) => parte.startsWith("panel="));
-  if (!trozo) return false;
+  if (!trozo) return null;
   const valor = decodeURIComponent(trozo.slice("panel=".length));
-  const punto = valor.indexOf(".");
-  if (punto < 1) return false;
-  const expira = valor.slice(0, punto);
-  const firma = valor.slice(punto + 1);
-  if (!/^\d+$/.test(expira) || Number(expira) < Date.now()) return false;
-  const esperada = firmaDe(expira);
+  const partes = valor.split(".");
+  if (partes.length < 2) return null;
+  const firma = partes.pop();
+  const cuerpo = partes.join(".");
+  const expira = partes[0];
+  if (!/^\d+$/.test(expira) || Number(expira) < Date.now()) return null;
+  const esperada = firmaDe(cuerpo);
   const a = Buffer.from(firma);
   const b = Buffer.from(esperada);
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  if (a.length !== b.length) return null;
+  if (!crypto.timingSafeEqual(a, b)) return null;
+  return { usuarioId: partes.slice(1).join(".") };
+}
+
+async function cargarSesion(req) {
+  const marca = leerMarca(req);
+  if (!marca) return null;
+  if (!marca.usuarioId) {
+    return { maestro: true, papel: "admin", personaId: "", usuarioId: "", usuario: "", nombre: "Administración" };
+  }
+  const usuario = await operacion.obtenerUsuario(marca.usuarioId);
+  if (!usuario || usuario.activo === false) return null;
+  return {
+    maestro: false,
+    papel: usuario.papel,
+    personaId: usuario.personaId,
+    usuarioId: usuario.id,
+    usuario: usuario.usuario,
+    nombre: usuario.nombre || usuario.usuario,
+  };
 }
 
 function ipDe(req) {
@@ -78,9 +98,10 @@ function anotarIntento(mapa, ip) {
   mapa.set(ip, lista);
 }
 
-function ponerCookie(res) {
+function ponerCookie(res, usuarioId) {
   const expira = Date.now() + 14 * 24 * 60 * 60 * 1000;
-  const token = `${expira}.${firmaDe(expira)}`;
+  const cuerpo = usuarioId ? expira + "." + usuarioId : String(expira);
+  const token = cuerpo + "." + firmaDe(cuerpo);
   res.cookie("panel", token, {
     httpOnly: true,
     sameSite: "lax",
@@ -111,8 +132,10 @@ function paginaLogin(error) {
   <form class="login" id="entrar">
     <p class="marca-login"><span>TAVA</span><span>DEV</span></p>
     <h1>Panel</h1>
-    <p>Entra para cuidar la página, los servicios y las cotizaciones.</p>
+    <p>Entra con tu usuario del equipo. Si usas la contraseña general, deja el usuario vacío.</p>
     ${falta}
+    <label for="usuario">Usuario</label>
+    <input id="usuario" autocomplete="username" />
     <label for="clave">Contraseña</label>
     <input id="clave" type="password" autocomplete="current-password" autofocus required />
     <button type="submit">Entrar</button>
@@ -122,10 +145,11 @@ function paginaLogin(error) {
     document.getElementById("entrar").addEventListener("submit", async (evento) => {
       evento.preventDefault();
       const clave = document.getElementById("clave").value;
+      const usuario = document.getElementById("usuario").value;
       const res = await fetch("/api/entrar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clave }),
+        body: JSON.stringify({ usuario, clave }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -146,11 +170,35 @@ function paginaLogin(error) {
 }
 
 function exigirPanel(req, res, next) {
-  if (cookiePanel(req)) return next();
-  if (String(req.originalUrl || "").startsWith("/api/")) {
-    return res.status(401).json({ error: "Entra con la contraseña" });
-  }
-  return res.redirect("/panel");
+  cargarSesion(req).then((sesion) => {
+    if (!sesion) {
+      if (String(req.originalUrl || "").startsWith("/api/")) {
+        return res.status(401).json({ error: "Entra con la contraseña" });
+      }
+      return res.redirect("/panel");
+    }
+    req.sesion = sesion;
+    next();
+  }).catch((error) => {
+    if (!res.headersSent) res.status(500).json({ error: error.message || "No se pudo revisar la sesión" });
+  });
+}
+
+function esEquipo(req) {
+  return req.sesion && !req.sesion.maestro && req.sesion.papel !== "admin";
+}
+
+function permiteEquipo(req) {
+  const m = req.method;
+  const p = req.path;
+  if (m === "GET" && ["/sesion", "/sitio", "/estado", "/personas", "/equipos", "/disponibilidades", "/chats", "/mensajes", "/roles", "/caracteristicas", "/organigrama", "/tablero"].includes(p)) return true;
+  if (m === "POST" && ["/chats", "/mensajes", "/personas", "/tareas", "/tareas/orden", "/notas", "/epicas", "/sprints", "/actividad-estados"].includes(p)) return true;
+  if (m === "POST" && /^\/chats\/[^/]+\/miembros$/.test(p)) return true;
+  if (m === "POST" && /^\/chats\/[^/]+$/.test(p)) return true;
+  if (m === "POST" && /^\/actividad-estados\/[^/]+\/mover$/.test(p)) return true;
+  if (m === "DELETE" && /^\/tareas\/[^/]+$/.test(p)) return true;
+  if (m === "DELETE" && /^\/notas\/[^/]+$/.test(p)) return true;
+  return false;
 }
 
 function iniciar(puerto, extras = {}) {
@@ -201,20 +249,37 @@ function iniciar(puerto, extras = {}) {
     res.json({ ok: true, id: cota.id });
   }));
 
-  app.post("/api/entrar", (req, res) => {
+  app.post("/api/entrar", manejar(async (req, res) => {
     const ip = ipDe(req);
     if (!clavePanel()) return res.status(503).json({ error: "El panel todavía no tiene contraseña" });
     if (demasiados(intentosClave, ip, 8)) {
       return res.status(429).json({ error: "Demasiados intentos. Espera unos minutos." });
     }
-    if (!mismaClave(req.body && req.body.clave)) {
+    const usuario = String((req.body && req.body.usuario) || "").trim();
+    const clave = String((req.body && req.body.clave) || "");
+    if (!usuario) {
+      if (!mismaClave(clave)) {
+        anotarIntento(intentosClave, ip);
+        return res.status(401).json({ error: "Contraseña incorrecta" });
+      }
+      intentosClave.delete(ip);
+      ponerCookie(res, "");
+      return res.json({ ok: true, maestro: true });
+    }
+    let hallado = null;
+    try {
+      hallado = await operacion.entrarUsuario(usuario, clave);
+    } catch (error) {
+      return res.status(503).json({ error: error.message || "No pude revisar el usuario" });
+    }
+    if (!hallado) {
       anotarIntento(intentosClave, ip);
-      return res.status(401).json({ error: "Contraseña incorrecta" });
+      return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
     }
     intentosClave.delete(ip);
-    ponerCookie(res);
-    res.json({ ok: true });
-  });
+    ponerCookie(res, hallado.id);
+    res.json({ ok: true, maestro: false });
+  }));
 
   app.post("/api/salir", (_req, res) => {
     res.clearCookie("panel", { path: "/" });
@@ -222,13 +287,25 @@ function iniciar(puerto, extras = {}) {
   });
 
   app.get("/panel", (req, res) => {
-    if (!cookiePanel(req)) return res.type("html").send(paginaLogin());
-    res.sendFile(path.join(__dirname, "panel", "index.html"));
+    cargarSesion(req).then((sesion) => {
+      if (!sesion) return res.type("html").send(paginaLogin());
+      res.sendFile(path.join(__dirname, "panel", "index.html"));
+    }).catch((error) => {
+      res.type("html").send(paginaLogin(error.message || "No pude revisar la sesión"));
+    });
   });
   app.use("/panel-assets", express.static(path.join(__dirname, "panel")));
 
   const panel = express.Router();
   panel.use(exigirPanel);
+  panel.use((req, res, next) => {
+    if (!esEquipo(req) || permiteEquipo(req)) return next();
+    res.status(403).json({ error: "Tu usuario entra al chat y a las actividades" });
+  });
+
+  panel.get("/sesion", (req, res) => {
+    res.json(req.sesion);
+  });
 
   panel.get("/estado", (_req, res) => {
     res.json({ supabase: contenido.usaSupabase(), whatsapp: qrWeb.resumen() });
@@ -345,7 +422,17 @@ function iniciar(puerto, extras = {}) {
   }));
 
   panel.post("/personas", manejar(async (req, res) => {
-    res.json(await operacion.guardarPersona(req.body || {}));
+    let cuerpo = req.body || {};
+    if (esEquipo(req)) {
+      if (!cuerpo.id || cuerpo.id !== req.sesion.personaId) {
+        return res.status(403).json({ error: "Solo puedes actualizar tu ficha" });
+      }
+      const actuales = await operacion.listarPersonas();
+      const propia = actuales.find((item) => item.id === cuerpo.id);
+      if (!propia) return res.status(404).json({ error: "No está tu ficha" });
+      cuerpo = { ...propia, apodo: cuerpo.apodo, disponibilidadId: cuerpo.disponibilidadId };
+    }
+    res.json(await operacion.guardarPersona(cuerpo));
   }));
 
   panel.delete("/personas/:id", manejar(async (req, res) => {
@@ -353,8 +440,84 @@ function iniciar(puerto, extras = {}) {
     res.json({ ok: true });
   }));
 
+  panel.get("/disponibilidades", manejar(async (_req, res) => {
+    res.json(await operacion.listarDisponibilidades());
+  }));
+
+  panel.post("/disponibilidades", manejar(async (req, res) => {
+    res.json(await operacion.guardarDisponibilidad(req.body || {}));
+  }));
+
+  panel.delete("/disponibilidades/:id", manejar(async (req, res) => {
+    await operacion.borrarDisponibilidad(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/chats", manejar(async (_req, res) => {
+    res.json(await operacion.listarChats());
+  }));
+
+  panel.post("/chats", manejar(async (req, res) => {
+    const cuerpo = req.body || {};
+    if (esEquipo(req)) {
+      const ids = Array.isArray(cuerpo.personaIds) ? cuerpo.personaIds.map(String) : [];
+      if (!ids.includes(req.sesion.personaId)) ids.push(req.sesion.personaId);
+      cuerpo.personaIds = ids;
+    }
+    res.json(await operacion.abrirChat(cuerpo));
+  }));
+
+  panel.post("/chats/:id", manejar(async (req, res) => {
+    res.json(await operacion.renombrarChat(req.params.id, (req.body || {}).nombre));
+  }));
+
+  panel.post("/chats/:id/miembros", manejar(async (req, res) => {
+    await operacion.agregarAlChat(req.params.id, (req.body || {}).personaId);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/mensajes", manejar(async (req, res) => {
+    res.json(await operacion.listarMensajes(String(req.query.chat || "")));
+  }));
+
+  panel.post("/mensajes", manejar(async (req, res) => {
+    const cuerpo = req.body || {};
+    if (esEquipo(req)) cuerpo.personaId = req.sesion.personaId;
+    res.json(await operacion.guardarMensaje(cuerpo));
+  }));
+
+  panel.get("/organigrama/sql", manejar(async (_req, res) => {
+    res.json({ sql: await operacion.sqlOrganigrama() });
+  }));
+
   panel.get("/organigrama", manejar(async (_req, res) => {
     res.json(await operacion.organigrama());
+  }));
+
+  panel.get("/roles", manejar(async (_req, res) => {
+    res.json(await operacion.listarRoles());
+  }));
+
+  panel.post("/roles", manejar(async (req, res) => {
+    res.json(await operacion.guardarRol(req.body || {}));
+  }));
+
+  panel.delete("/roles/:id", manejar(async (req, res) => {
+    await operacion.borrarRol(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/caracteristicas", manejar(async (_req, res) => {
+    res.json(await operacion.listarCaracteristicas());
+  }));
+
+  panel.post("/caracteristicas", manejar(async (req, res) => {
+    res.json(await operacion.guardarCaracteristica(req.body || {}));
+  }));
+
+  panel.delete("/caracteristicas/:id", manejar(async (req, res) => {
+    await operacion.borrarCaracteristica(req.params.id);
+    res.json({ ok: true });
   }));
 
   panel.get("/pausas", manejar(async (_req, res) => {
@@ -388,6 +551,80 @@ function iniciar(puerto, extras = {}) {
   panel.get("/colores-marca", (_req, res) => {
     res.json(contenido.coloresDeMarca());
   });
+
+  panel.get("/usuarios", manejar(async (_req, res) => {
+    res.json(await operacion.listarUsuarios());
+  }));
+
+  panel.post("/usuarios", manejar(async (req, res) => {
+    res.json(await operacion.guardarUsuario(req.body || {}));
+  }));
+
+  panel.delete("/usuarios/:id", manejar(async (req, res) => {
+    await operacion.borrarUsuario(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.get("/tablero", manejar(async (_req, res) => {
+    res.json(await operacion.tablero());
+  }));
+
+  panel.post("/actividad-estados", manejar(async (req, res) => {
+    res.json(await operacion.guardarActividadEstado(req.body || {}));
+  }));
+
+  panel.post("/actividad-estados/:id/mover", manejar(async (req, res) => {
+    const lista = await operacion.moverActividadEstado(req.params.id, Number(req.body && req.body.delta) || 0);
+    if (!lista) return res.status(404).json({ error: "No está ese estado" });
+    res.json(lista);
+  }));
+
+  panel.delete("/actividad-estados/:id", manejar(async (req, res) => {
+    await operacion.borrarActividadEstado(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.post("/epicas", manejar(async (req, res) => {
+    res.json(await operacion.guardarEpica(req.body || {}));
+  }));
+
+  panel.delete("/epicas/:id", manejar(async (req, res) => {
+    await operacion.borrarEpica(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.post("/sprints", manejar(async (req, res) => {
+    res.json(await operacion.guardarSprint(req.body || {}));
+  }));
+
+  panel.delete("/sprints/:id", manejar(async (req, res) => {
+    await operacion.borrarSprint(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.post("/tareas/orden", manejar(async (req, res) => {
+    res.json(await operacion.ordenarTareas(req.body || {}));
+  }));
+
+  panel.post("/tareas", manejar(async (req, res) => {
+    res.json(await operacion.guardarTarea(req.body || {}));
+  }));
+
+  panel.delete("/tareas/:id", manejar(async (req, res) => {
+    await operacion.borrarTarea(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  panel.post("/notas", manejar(async (req, res) => {
+    const cuerpo = req.body || {};
+    if (esEquipo(req)) cuerpo.personaId = req.sesion.personaId;
+    res.json(await operacion.guardarNota(cuerpo));
+  }));
+
+  panel.delete("/notas/:id", manejar(async (req, res) => {
+    await operacion.borrarNota(req.params.id);
+    res.json({ ok: true });
+  }));
 
   app.use("/api/admin", panel);
 

@@ -197,6 +197,174 @@ create table if not exists personas (
 create index if not exists personas_equipo_idx on personas (equipo_id);
 create index if not exists personas_reporta_idx on personas (reporta_a);
 
+create table if not exists roles (
+  id text primary key,
+  codigo text not null,
+  nombre text not null,
+  descripcion text not null default '',
+  orden int not null default 0
+);
+
+create unique index if not exists roles_codigo_idx on roles (codigo);
+
+create table if not exists caracteristicas (
+  id text primary key,
+  rol_id text references roles(id) on delete cascade,
+  codigo text not null,
+  nombre text not null,
+  orden int not null default 0
+);
+
+create index if not exists caracteristicas_rol_idx on caracteristicas (rol_id);
+create unique index if not exists caracteristicas_codigo_idx on caracteristicas (rol_id, codigo);
+
+alter table personas add column if not exists rol_id text;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'personas_rol_id_fkey') then
+    alter table personas
+      add constraint personas_rol_id_fkey
+      foreign key (rol_id) references roles(id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists personas_rol_idx on personas (rol_id);
+
+alter table personas add column if not exists apodo text not null default '';
+alter table personas add column if not exists foto text not null default '';
+alter table personas add column if not exists disponibilidad_id text;
+
+create table if not exists disponibilidades (
+  id text primary key,
+  nombre text not null,
+  color text not null default '#7B5FD1',
+  orden int not null default 0
+);
+
+insert into disponibilidades (id, nombre, color, orden) values
+  ('disp-disponible', 'Disponible', '#3C8F63', 0),
+  ('disp-ocupado', 'Ocupado', '#C47B2A', 1),
+  ('disp-ensayo', 'En ensayo', '#6A4BC4', 2),
+  ('disp-ausente', 'Ausente', '#9D2F4A', 3)
+on conflict (id) do nothing;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'personas_disponibilidad_id_fkey') then
+    alter table personas
+      add constraint personas_disponibilidad_id_fkey
+      foreign key (disponibilidad_id) references disponibilidades(id) on delete set null;
+  end if;
+end $$;
+
+create table if not exists chats (
+  id text primary key,
+  tipo text not null check (tipo in ('directo', 'grupo')),
+  nombre text not null default '',
+  clave text,
+  creado_en timestamptz not null default now()
+);
+
+create unique index if not exists chats_clave_idx on chats (clave) where clave is not null;
+
+create table if not exists chat_miembros (
+  chat_id text not null references chats(id) on delete cascade,
+  persona_id text not null references personas(id) on delete cascade,
+  primary key (chat_id, persona_id)
+);
+
+create table if not exists mensajes (
+  id text primary key,
+  chat_id text not null references chats(id) on delete cascade,
+  persona_id text references personas(id) on delete set null,
+  texto text not null default '',
+  emote text not null default '',
+  creado_en timestamptz not null default now()
+);
+
+create index if not exists mensajes_chat_idx on mensajes (chat_id, creado_en);
+
+create table if not exists usuarios (
+  id text primary key,
+  persona_id text not null references personas(id) on delete cascade,
+  usuario text not null,
+  clave_hash text not null,
+  papel text not null default 'equipo' check (papel in ('admin', 'equipo')),
+  activo boolean not null default true,
+  creado_en timestamptz not null default now()
+);
+
+create unique index if not exists usuarios_persona_idx on usuarios (persona_id);
+create unique index if not exists usuarios_usuario_idx on usuarios (usuario);
+
+create table if not exists actividad_estados (
+  id text primary key,
+  nombre text not null,
+  orden int not null default 0,
+  color text not null default '#7B5FD1',
+  es_inicial boolean not null default false,
+  es_final boolean not null default false
+);
+
+insert into actividad_estados (id, nombre, orden, color, es_inicial, es_final) values
+  ('act-por-hacer', 'Por hacer', 0, '#7B5FD1', true, false),
+  ('act-en-curso', 'En curso', 1, '#6A4BC4', false, false),
+  ('act-revision', 'En revisión', 2, '#E57FB8', false, false),
+  ('act-listo', 'Listo', 3, '#3C8F63', false, true)
+on conflict (id) do nothing;
+
+create table if not exists epicas (
+  id text primary key,
+  nombre text not null,
+  resumen text not null default '',
+  color text not null default '#7B5FD1',
+  estado text not null default 'abierta' check (estado in ('abierta', 'cerrada')),
+  orden int not null default 0,
+  creado_en timestamptz not null default now()
+);
+
+create table if not exists sprints (
+  id text primary key,
+  nombre text not null,
+  meta text not null default '',
+  inicio text not null default '',
+  fin text not null default '',
+  estado text not null default 'planificado' check (estado in ('planificado', 'activo', 'cerrado')),
+  orden int not null default 0,
+  creado_en timestamptz not null default now()
+);
+
+create table if not exists tareas (
+  id text primary key,
+  titulo text not null,
+  detalle text not null default '',
+  criterio text not null default '',
+  tipo text not null default 'tarea' check (tipo in ('historia', 'tarea', 'error')),
+  prioridad text not null default 'media' check (prioridad in ('baja', 'media', 'alta', 'urgente')),
+  puntos int,
+  epica_id text references epicas(id) on delete set null,
+  sprint_id text references sprints(id) on delete set null,
+  estado_id text not null references actividad_estados(id) on delete restrict,
+  persona_id text references personas(id) on delete set null,
+  orden int not null default 0,
+  creado_en timestamptz not null default now()
+);
+
+create index if not exists tareas_estado_idx on tareas (estado_id, orden);
+create index if not exists tareas_sprint_idx on tareas (sprint_id);
+create index if not exists tareas_epica_idx on tareas (epica_id);
+
+create table if not exists notas (
+  id text primary key,
+  tarea_id text not null references tareas(id) on delete cascade,
+  persona_id text references personas(id) on delete set null,
+  texto text not null,
+  creado_en timestamptz not null default now()
+);
+
+create index if not exists notas_tarea_idx on notas (tarea_id, creado_en);
+
 insert into ofertas (id, tipo, activo, orden, icono, nombre, resumen, tono, imagen)
 select
   s.item->>'id',
@@ -342,6 +510,18 @@ alter table pedidos enable row level security;
 alter table pedido_items enable row level security;
 alter table equipos enable row level security;
 alter table personas enable row level security;
+alter table roles enable row level security;
+alter table caracteristicas enable row level security;
+alter table disponibilidades enable row level security;
+alter table chats enable row level security;
+alter table chat_miembros enable row level security;
+alter table mensajes enable row level security;
+alter table usuarios enable row level security;
+alter table actividad_estados enable row level security;
+alter table epicas enable row level security;
+alter table sprints enable row level security;
+alter table tareas enable row level security;
+alter table notas enable row level security;
 
 insert into storage.buckets (id, name, public)
 values ('marca', 'marca', true)
