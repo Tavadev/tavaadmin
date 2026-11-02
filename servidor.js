@@ -98,6 +98,60 @@ function anotarIntento(mapa, ip) {
   mapa.set(ip, lista);
 }
 
+function leerCookie(req, nombre) {
+  const trozo = String(req.headers.cookie || "")
+    .split(";")
+    .map((parte) => parte.trim())
+    .find((parte) => parte.startsWith(nombre + "="));
+  if (!trozo) return "";
+  return decodeURIComponent(trozo.slice(nombre.length + 1));
+}
+
+function googleListo() {
+  return Boolean(String(process.env.GOOGLE_CLIENT_ID || "").trim() && String(process.env.GOOGLE_CLIENT_SECRET || "").trim());
+}
+
+function origenDe(req) {
+  const fijo = String(process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "").trim().replace(/\/$/, "");
+  if (fijo) return fijo;
+  const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "http").split(",")[0].trim();
+  const host = String(req.headers["x-forwarded-host"] || req.get("host") || "").split(",")[0].trim();
+  return proto + "://" + host;
+}
+
+function ponerEstadoGoogle(res, state) {
+  const expira = Date.now() + 10 * 60 * 1000;
+  const cuerpo = expira + "." + state;
+  const token = cuerpo + "." + firmaDe(cuerpo);
+  res.cookie("google_state", token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 10 * 60 * 1000,
+    secure: Boolean(process.env.RENDER),
+  });
+}
+
+function leerEstadoGoogle(req) {
+  const valor = leerCookie(req, "google_state");
+  const partes = valor.split(".");
+  if (partes.length < 3) return "";
+  const firma = partes.pop();
+  const cuerpo = partes.join(".");
+  const expira = partes[0];
+  if (!/^\d+$/.test(expira) || Number(expira) < Date.now()) return "";
+  const esperada = firmaDe(cuerpo);
+  const a = Buffer.from(firma);
+  const b = Buffer.from(esperada);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return "";
+  return partes.slice(1).join(".");
+}
+
+function falloGoogle(res, mensaje) {
+  res.clearCookie("google_state", { path: "/" });
+  res.type("html").send(paginaLogin(mensaje));
+}
+
 function ponerCookie(res, usuarioId) {
   const expira = Date.now() + 14 * 24 * 60 * 60 * 1000;
   const cuerpo = usuarioId ? expira + "." + usuarioId : String(expira);
@@ -111,8 +165,16 @@ function ponerCookie(res, usuarioId) {
   });
 }
 
+function escaparHtml(valor) {
+  return String(valor || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function paginaLogin(error) {
-  const aviso = error ? `<p class="mal">${error}</p>` : "";
+  const aviso = error ? `<p class="mal">${escaparHtml(error)}</p>` : "";
   const falta = !clavePanel()
     ? `<p class="mal">Falta PANEL_CLAVE en el entorno. Sin esa clave el panel no abre.</p>`
     : "";
@@ -132,8 +194,10 @@ function paginaLogin(error) {
   <form class="login" id="entrar">
     <p class="marca-login"><span>TAVA</span><span>DEV</span></p>
     <h1>Panel</h1>
-    <p>Entra con tu usuario del equipo. Si usas la contraseña general, deja el usuario vacío.</p>
+    <p>Entra con Gmail. Si es tu primera vez, se crea tu ficha y quedas en el chat y el tablero. También puedes usar tu usuario. Si usas la contraseña general, deja el usuario vacío.</p>
     ${falta}
+    <a class="gmail" href="/api/google">Entrar con Gmail</a>
+    <p class="corte">o con usuario</p>
     <label for="usuario">Usuario</label>
     <input id="usuario" autocomplete="username" />
     <label for="clave">Contraseña</label>
@@ -279,6 +343,75 @@ function iniciar(puerto, extras = {}) {
     intentosClave.delete(ip);
     ponerCookie(res, hallado.id);
     res.json({ ok: true, maestro: false });
+  }));
+
+  app.get("/api/google", (req, res) => {
+    if (!clavePanel()) return res.type("html").send(paginaLogin("Falta PANEL_CLAVE en el entorno."));
+    if (!googleListo()) {
+      return res.type("html").send(paginaLogin("Falta conectar Gmail. En Render agrega GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET, y en Google Cloud autoriza la dirección /api/google/callback."));
+    }
+    const state = crypto.randomBytes(16).toString("hex");
+    ponerEstadoGoogle(res, state);
+    const destino = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
+      client_id: String(process.env.GOOGLE_CLIENT_ID).trim(),
+      redirect_uri: origenDe(req) + "/api/google/callback",
+      response_type: "code",
+      scope: "openid email profile",
+      state,
+      prompt: "select_account",
+    }).toString();
+    res.redirect(destino);
+  });
+
+  app.get("/api/google/callback", manejar(async (req, res) => {
+    const ip = ipDe(req);
+    if (!clavePanel()) return falloGoogle(res, "Falta PANEL_CLAVE en el entorno.");
+    if (!googleListo()) return falloGoogle(res, "Falta conectar Gmail.");
+    if (demasiados(intentosClave, ip, 8)) return falloGoogle(res, "Demasiados intentos. Espera unos minutos.");
+    const esperado = leerEstadoGoogle(req);
+    const recibido = String(req.query.state || "");
+    if (!esperado || esperado !== recibido) return falloGoogle(res, "La entrada con Gmail venció. Inténtalo de nuevo.");
+    if (req.query.error) return falloGoogle(res, "No se completó la entrada con Gmail.");
+    const code = String(req.query.code || "");
+    if (!code) return falloGoogle(res, "Gmail no devolvió la autorización.");
+    const redirectUri = origenDe(req) + "/api/google/callback";
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: String(process.env.GOOGLE_CLIENT_ID).trim(),
+        client_secret: String(process.env.GOOGLE_CLIENT_SECRET).trim(),
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+    const token = await tokenRes.json().catch(() => ({}));
+    if (!tokenRes.ok || !token.access_token) {
+      anotarIntento(intentosClave, ip);
+      return falloGoogle(res, "No pude confirmar la cuenta de Gmail.");
+    }
+    const infoRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: "Bearer " + token.access_token },
+    });
+    const info = await infoRes.json().catch(() => ({}));
+    if (!infoRes.ok) return falloGoogle(res, "Gmail no entregó el correo.");
+    let hallado;
+    try {
+      hallado = await operacion.entrarConGoogle({
+        sub: info.sub,
+        correo: info.email,
+        verificado: info.email_verified === true || info.email_verified === "true",
+        nombre: info.name || "",
+        foto: info.picture || "",
+      });
+    } catch (error) {
+      return falloGoogle(res, error.message || "No pude registrar la cuenta de Gmail");
+    }
+    intentosClave.delete(ip);
+    res.clearCookie("google_state", { path: "/" });
+    ponerCookie(res, hallado.id);
+    res.redirect("/panel");
   }));
 
   app.post("/api/salir", (_req, res) => {

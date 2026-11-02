@@ -1496,6 +1496,15 @@ function avisoPlan() {
   return "Faltan los usuarios o el tablero en Supabase. Vuelve a pegar supabase/schema.sql y dale Run.";
 }
 
+function avisoGoogle() {
+  return "Falta el acceso con Gmail en Supabase. Vuelve a pegar supabase/schema.sql y dale Run.";
+}
+
+function faltaColumnaGoogle(error) {
+  const msg = String((error && error.message) || "");
+  return /42703|PGRST204|schema cache|does not exist|Could not find/i.test(msg) && /correo|google_sub/i.test(msg);
+}
+
 function normalizarUsuario(valor) {
   return String(valor || "")
     .normalize("NFD")
@@ -1536,6 +1545,8 @@ function filaUsuario(row, personas) {
     activo: row.activo !== false && row.activo !== "false",
     nombre: persona ? persona.nombre : "",
     cargo: persona ? persona.cargo || "" : "",
+    correo: String(row.correo || "").trim().toLowerCase(),
+    googleSub: row.google_sub || row.googleSub || "",
     claveHash: row.clave_hash || row.claveHash || "",
   };
 }
@@ -1549,16 +1560,22 @@ function usuarioPublico(fila) {
     activo: fila.activo,
     nombre: fila.nombre,
     cargo: fila.cargo,
+    correo: fila.correo || "",
+    gmail: Boolean(fila.googleSub),
   };
 }
 
 async function listarUsuariosCrudo() {
   const personas = await listarPersonas();
   if (await tablasNuevas()) {
-    const { data, error } = await clienteSupabase().from("usuarios").select("id, persona_id, usuario, papel, activo, clave_hash");
-    if (error && faltaTabla(error)) throw new Error(avisoPlan());
-    if (error) throw new Error(error.message);
-    return (data || []).map((row) => filaUsuario(row, personas));
+    const client = clienteSupabase();
+    let consulta = await client.from("usuarios").select("id, persona_id, usuario, papel, activo, clave_hash, correo, google_sub");
+    if (consulta.error && faltaColumnaGoogle(consulta.error)) {
+      consulta = await client.from("usuarios").select("id, persona_id, usuario, papel, activo, clave_hash");
+    }
+    if (consulta.error && faltaTabla(consulta.error)) throw new Error(avisoPlan());
+    if (consulta.error) throw new Error(consulta.error.message);
+    return (consulta.data || []).map((row) => filaUsuario(row, personas));
   }
   if (usaSupabase()) exigirTablas();
   return leerLocal().usuarios.map((row) => filaUsuario(row, personas));
@@ -1585,6 +1602,84 @@ async function entrarUsuario(usuario, clave) {
   return usuarioPublico(fila);
 }
 
+function usuarioDesdeCorreo(correo, actuales) {
+  const ocupados = new Set(actuales.map((item) => item.usuario));
+  let base = normalizarUsuario(String(correo).split("@")[0]);
+  if (base.length < 3) base = (base + "gmail").slice(0, 24);
+  let candidato = base.slice(0, 24);
+  let n = 2;
+  while (ocupados.has(candidato)) {
+    const sufijo = String(n);
+    candidato = (base.slice(0, Math.max(3, 24 - sufijo.length)) + sufijo).slice(0, 24);
+    n += 1;
+    if (n > 500) throw new Error("No pude crear el usuario de Gmail");
+  }
+  return candidato;
+}
+
+function nombreDeGoogle(nombre, correo) {
+  const limpio = recorte(nombre, 80);
+  if (limpio.length >= 2) return limpio;
+  const local = recorte(String(correo).split("@")[0].replace(/[._-]+/g, " "), 80);
+  return local.length >= 2 ? local : "Persona Gmail";
+}
+
+function fotoDeGoogle(url) {
+  const limpia = String(url || "").trim();
+  if (!/^https:\/\//i.test(limpia) || limpia.length > 300) return "";
+  return limpia;
+}
+
+async function entrarConGoogle(perfil) {
+  const correo = recorte(String(perfil.correo || "").trim().toLowerCase(), 80);
+  const sub = recorte(String(perfil.sub || "").trim(), 128);
+  if (!correo || !correo.includes("@")) throw new Error("Gmail no entregó un correo");
+  if (!perfil.verificado) throw new Error("Ese correo de Gmail no está verificado");
+  if (!sub) throw new Error("Gmail no entregó la cuenta");
+  const actuales = await listarUsuariosCrudo();
+  const personas = await listarPersonas();
+  let cuenta = actuales.find((item) => item.googleSub && item.googleSub === sub)
+    || actuales.find((item) => item.correo && item.correo === correo);
+  let persona = cuenta ? personas.find((item) => item.id === cuenta.personaId) : null;
+  if (!persona) {
+    persona = personas.find((item) => String(item.correo || "").trim().toLowerCase() === correo) || null;
+    if (persona) cuenta = actuales.find((item) => item.personaId === persona.id) || cuenta;
+  }
+  if (!persona) {
+    persona = await guardarPersona({
+      nombre: nombreDeGoogle(perfil.nombre, correo),
+      correo,
+      foto: fotoDeGoogle(perfil.foto),
+      nota: "Entró con Gmail",
+    });
+  }
+  if (!cuenta) {
+    const frescos = await listarUsuariosCrudo();
+    cuenta = await guardarUsuario({
+      personaId: persona.id,
+      usuario: usuarioDesdeCorreo(correo, frescos),
+      papel: "equipo",
+      activo: true,
+      correo,
+      googleSub: sub,
+    });
+  } else if (cuenta.googleSub !== sub || cuenta.correo !== correo) {
+    cuenta = await guardarUsuario({
+      id: cuenta.id,
+      personaId: cuenta.personaId,
+      usuario: cuenta.usuario,
+      papel: cuenta.papel,
+      activo: cuenta.activo,
+      correo,
+      googleSub: sub,
+    });
+  } else {
+    cuenta = usuarioPublico(cuenta);
+  }
+  if (!cuenta.activo) throw new Error("Esta cuenta está en pausa");
+  return cuenta;
+}
+
 async function guardarUsuario(entrada) {
   const personas = await listarPersonas();
   const personaId = recorte(entrada.personaId, 40);
@@ -1598,28 +1693,53 @@ async function guardarUsuario(entrada) {
   if (entrada.id && !actual) throw new Error("No está ese usuario");
   if (actuales.some((item) => item.usuario === usuario && item.id !== id)) throw new Error("Ese usuario ya existe");
   if (actuales.some((item) => item.personaId === personaId && item.id !== id)) throw new Error("Esa persona ya tiene usuario");
+  const correoCuenta = entrada.correo != null
+    ? recorte(String(entrada.correo).trim().toLowerCase(), 80)
+    : (actual && actual.correo) || "";
+  const googleSub = entrada.googleSub != null
+    ? recorte(String(entrada.googleSub).trim(), 128)
+    : (actual && actual.googleSub) || "";
+  if (correoCuenta && actuales.some((item) => item.correo && item.correo === correoCuenta && item.id !== id)) {
+    throw new Error("Ese correo ya tiene usuario");
+  }
+  if (googleSub && actuales.some((item) => item.googleSub === googleSub && item.id !== id)) {
+    throw new Error("Esa cuenta de Gmail ya está registrada");
+  }
   const clave = String(entrada.clave || "");
-  if (!actual && clave.length < 6) throw new Error("La contraseña necesita al menos 6 caracteres");
+  if (!actual && !googleSub && clave.length < 6) throw new Error("La contraseña necesita al menos 6 caracteres");
   if (clave && clave.length < 6) throw new Error("La contraseña necesita al menos 6 caracteres");
+  const persona = personas.find((item) => item.id === personaId) || {};
   const fila = {
     id,
     personaId,
     usuario,
     papel,
     activo: entrada.activo == null ? (actual ? actual.activo : true) : entrada.activo !== false,
-    claveHash: clave ? hashClave(clave) : actual.claveHash,
-    nombre: (personas.find((item) => item.id === personaId) || {}).nombre || "",
-    cargo: (personas.find((item) => item.id === personaId) || {}).cargo || "",
+    claveHash: clave ? hashClave(clave) : (actual ? actual.claveHash : ""),
+    nombre: persona.nombre || "",
+    cargo: persona.cargo || "",
+    correo: correoCuenta,
+    googleSub,
   };
   if (await tablasNuevas()) {
-    const { error } = await clienteSupabase().from("usuarios").upsert({
+    const cuerpo = {
       id: fila.id,
       persona_id: fila.personaId,
       usuario: fila.usuario,
       papel: fila.papel,
       activo: fila.activo,
       clave_hash: fila.claveHash,
-    });
+      correo: fila.correo,
+      google_sub: fila.googleSub,
+    };
+    let { error } = await clienteSupabase().from("usuarios").upsert(cuerpo);
+    if (error && faltaColumnaGoogle(error)) {
+      if (fila.correo || fila.googleSub) throw new Error(avisoGoogle());
+      delete cuerpo.correo;
+      delete cuerpo.google_sub;
+      const segundo = await clienteSupabase().from("usuarios").upsert(cuerpo);
+      error = segundo.error;
+    }
     if (error && faltaTabla(error)) throw new Error(avisoPlan());
     if (error) throw new Error(error.message);
     return usuarioPublico(fila);
@@ -2241,6 +2361,7 @@ module.exports = {
   listarUsuarios,
   obtenerUsuario,
   entrarUsuario,
+  entrarConGoogle,
   guardarUsuario,
   borrarUsuario,
   listarActividadEstados,

@@ -292,11 +292,18 @@ create table if not exists usuarios (
   clave_hash text not null,
   papel text not null default 'equipo' check (papel in ('admin', 'equipo')),
   activo boolean not null default true,
+  correo text not null default '',
+  google_sub text not null default '',
   creado_en timestamptz not null default now()
 );
 
+alter table usuarios add column if not exists correo text not null default '';
+alter table usuarios add column if not exists google_sub text not null default '';
+
 create unique index if not exists usuarios_persona_idx on usuarios (persona_id);
 create unique index if not exists usuarios_usuario_idx on usuarios (usuario);
+create unique index if not exists usuarios_google_idx on usuarios (google_sub) where google_sub <> '';
+create unique index if not exists usuarios_correo_idx on usuarios (lower(correo)) where correo <> '';
 
 create table if not exists actividad_estados (
   id text primary key,

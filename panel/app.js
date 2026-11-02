@@ -3386,7 +3386,7 @@ async function pintarUsuarios() {
   caja.className = "";
   caja.textContent = "";
   const libres = personas.filter((item) => !usuarios.some((cuenta) => cuenta.personaId === item.id));
-  const form = tarjeta("Nuevo usuario", "El usuario se cuelga de una persona del equipo. En el chat escribe con esa ficha. Quien entra con la contraseña general deja el usuario vacío y ve todo.");
+  const form = tarjeta("Nuevo usuario", "Cada persona puede entrar con Gmail: la primera vez se crea su ficha y queda en el chat y el tablero. Desde aquí le subes el papel o la pausas. El usuario y la contraseña siguen sirviendo. Quien entra con la contraseña general deja el usuario vacío y ve todo.");
   if (!personas.length) {
     const p = document.createElement("p");
     p.className = "ayuda";
@@ -3427,7 +3427,13 @@ async function pintarUsuarios() {
     nombre.textContent = (cuenta.nombre || "Sin ficha") + " · " + cuenta.usuario;
     const meta = document.createElement("p");
     meta.className = "ayuda";
-    meta.textContent = (cuenta.papel === "admin" ? "Administra el panel" : "Chat y tablero") + (cuenta.activo ? "" : " · en pausa") + (cuenta.cargo ? " · " + cuenta.cargo : "");
+    meta.textContent = [
+      cuenta.papel === "admin" ? "Administra el panel" : "Chat y tablero",
+      cuenta.gmail ? "Entra con Gmail" : "",
+      cuenta.correo || "",
+      cuenta.activo ? "" : "en pausa",
+      cuenta.cargo || "",
+    ].filter(Boolean).join(" · ");
     const controles = document.createElement("div");
     controles.className = "fila";
     controles.append(elegir("Papel", [{ id: "equipo", nombre: "Equipo" }, { id: "admin", nombre: "Administra" }], cuenta.papel, async (valor) => {
