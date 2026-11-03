@@ -290,7 +290,7 @@ create table if not exists usuarios (
   persona_id text not null references personas(id) on delete cascade,
   usuario text not null,
   clave_hash text not null,
-  papel text not null default 'equipo' check (papel in ('admin', 'equipo')),
+  papel text not null default 'equipo' check (papel in ('admin', 'lider', 'equipo')),
   activo boolean not null default true,
   correo text not null default '',
   google_sub text not null default '',
@@ -304,6 +304,23 @@ create unique index if not exists usuarios_persona_idx on usuarios (persona_id);
 create unique index if not exists usuarios_usuario_idx on usuarios (usuario);
 create unique index if not exists usuarios_google_idx on usuarios (google_sub) where google_sub <> '';
 create unique index if not exists usuarios_correo_idx on usuarios (lower(correo)) where correo <> '';
+
+do $$
+declare
+  nombre text;
+begin
+  for nombre in
+    select conname
+    from pg_constraint
+    where conrelid = 'usuarios'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%papel%'
+  loop
+    execute format('alter table usuarios drop constraint %I', nombre);
+  end loop;
+end $$;
+
+alter table usuarios add constraint usuarios_papel_check check (papel in ('admin', 'lider', 'equipo'));
 
 create table if not exists actividad_estados (
   id text primary key,

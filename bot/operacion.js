@@ -1534,6 +1534,13 @@ function claveCoincide(clave, guardada) {
   return crypto.timingSafeEqual(hash, esperada);
 }
 
+function papelGuardado(row, persona) {
+  const correoUsuario = String((row && row.correo) || "").trim().toLowerCase();
+  const correoPersona = String((persona && persona.correo) || "").trim().toLowerCase();
+  if (correoUsuario === "tavadevadmin@gmail.com" || correoPersona === "tavadevadmin@gmail.com") return "admin";
+  return row && row.papel === "lider" ? "lider" : "equipo";
+}
+
 function filaUsuario(row, personas) {
   const personaId = row.persona_id || row.personaId || "";
   const persona = (personas || []).find((item) => item.id === personaId);
@@ -1541,7 +1548,7 @@ function filaUsuario(row, personas) {
     id: row.id,
     personaId,
     usuario: row.usuario || "",
-    papel: row.papel === "admin" ? "admin" : "equipo",
+    papel: papelGuardado(row, persona),
     activo: row.activo !== false && row.activo !== "false",
     nombre: persona ? persona.nombre : "",
     cargo: persona ? persona.cargo || "" : "",
@@ -1617,6 +1624,10 @@ function usuarioDesdeCorreo(correo, actuales) {
   return candidato;
 }
 
+function correoEsAdmin(correo) {
+  return String(correo || "").trim().toLowerCase() === "tavadevadmin@gmail.com";
+}
+
 function nombreDeGoogle(nombre, correo) {
   const limpio = recorte(nombre, 80);
   if (limpio.length >= 2) return limpio;
@@ -1653,25 +1664,28 @@ async function entrarConGoogle(perfil) {
       nota: "Entró con Gmail",
     });
   }
+  const papel = correoEsAdmin(correo) ? "admin" : (cuenta ? cuenta.papel : "equipo");
   if (!cuenta) {
     const frescos = await listarUsuariosCrudo();
     cuenta = await guardarUsuario({
       personaId: persona.id,
       usuario: usuarioDesdeCorreo(correo, frescos),
-      papel: "equipo",
+      papel,
       activo: true,
       correo,
       googleSub: sub,
+      vincularGoogle: true,
     });
-  } else if (cuenta.googleSub !== sub || cuenta.correo !== correo) {
+  } else if (cuenta.googleSub !== sub || cuenta.correo !== correo || cuenta.papel !== papel) {
     cuenta = await guardarUsuario({
       id: cuenta.id,
       personaId: cuenta.personaId,
       usuario: cuenta.usuario,
-      papel: cuenta.papel,
+      papel,
       activo: cuenta.activo,
       correo,
       googleSub: sub,
+      vincularGoogle: true,
     });
   } else {
     cuenta = usuarioPublico(cuenta);
@@ -1682,23 +1696,27 @@ async function entrarConGoogle(perfil) {
 
 async function guardarUsuario(entrada) {
   const personas = await listarPersonas();
-  const personaId = recorte(entrada.personaId, 40);
-  const usuario = normalizarUsuario(entrada.usuario);
-  const papel = entrada.papel === "admin" ? "admin" : "equipo";
-  if (!personas.some((item) => item.id === personaId)) throw new Error("Elige una persona del equipo");
-  if (usuario.length < 3) throw new Error("El usuario necesita al menos 3 letras o números");
   const actuales = await listarUsuariosCrudo();
   const id = entrada.id || idCorto("US-");
   const actual = actuales.find((item) => item.id === id);
   if (entrada.id && !actual) throw new Error("No está ese usuario");
+  const personaId = recorte(entrada.personaId || (actual && actual.personaId), 40);
+  const usuario = normalizarUsuario(entrada.usuario || (actual && actual.usuario));
+  const persona = personas.find((item) => item.id === personaId) || {};
+  const correoCuenta = entrada.vincularGoogle
+    ? recorte(String(entrada.correo || "").trim().toLowerCase(), 80)
+    : (actual && actual.correo) || "";
+  const googleSub = entrada.vincularGoogle
+    ? recorte(String(entrada.googleSub || "").trim(), 128)
+    : (actual && actual.googleSub) || "";
+  const dueno = correoEsAdmin(correoCuenta) || correoEsAdmin(persona.correo);
+  let papel = entrada.papel === "admin" || entrada.papel === "lider" ? entrada.papel : "equipo";
+  if (dueno) papel = "admin";
+  else if (papel === "admin") throw new Error("El único administrador es tavadevadmin@gmail.com");
+  if (!personas.some((item) => item.id === personaId)) throw new Error("Elige una persona del equipo");
+  if (usuario.length < 3) throw new Error("El usuario necesita al menos 3 letras o números");
   if (actuales.some((item) => item.usuario === usuario && item.id !== id)) throw new Error("Ese usuario ya existe");
   if (actuales.some((item) => item.personaId === personaId && item.id !== id)) throw new Error("Esa persona ya tiene usuario");
-  const correoCuenta = entrada.correo != null
-    ? recorte(String(entrada.correo).trim().toLowerCase(), 80)
-    : (actual && actual.correo) || "";
-  const googleSub = entrada.googleSub != null
-    ? recorte(String(entrada.googleSub).trim(), 128)
-    : (actual && actual.googleSub) || "";
   if (correoCuenta && actuales.some((item) => item.correo && item.correo === correoCuenta && item.id !== id)) {
     throw new Error("Ese correo ya tiene usuario");
   }
@@ -1708,7 +1726,6 @@ async function guardarUsuario(entrada) {
   const clave = String(entrada.clave || "");
   if (!actual && !googleSub && clave.length < 6) throw new Error("La contraseña necesita al menos 6 caracteres");
   if (clave && clave.length < 6) throw new Error("La contraseña necesita al menos 6 caracteres");
-  const persona = personas.find((item) => item.id === personaId) || {};
   const fila = {
     id,
     personaId,
@@ -1741,6 +1758,9 @@ async function guardarUsuario(entrada) {
       error = segundo.error;
     }
     if (error && faltaTabla(error)) throw new Error(avisoPlan());
+    if (error && /papel_check|check constraint/i.test(String(error.message || ""))) {
+      throw new Error("Falta el rol de líder en Supabase. Vuelve a pegar supabase/schema.sql y dale Run.");
+    }
     if (error) throw new Error(error.message);
     return usuarioPublico(fila);
   }
@@ -1754,6 +1774,10 @@ async function guardarUsuario(entrada) {
 }
 
 async function borrarUsuario(id) {
+  const actual = (await listarUsuariosCrudo()).find((item) => item.id === id);
+  if (actual && (correoEsAdmin(actual.correo) || actual.papel === "admin")) {
+    throw new Error("Esa cuenta es el administrador y se queda");
+  }
   if (await tablasNuevas()) {
     const { error } = await clienteSupabase().from("usuarios").delete().eq("id", id);
     if (error && faltaTabla(error)) throw new Error(avisoPlan());

@@ -187,7 +187,7 @@ function paginaLogin(error) {
   <title>Entrar · TAVADEV</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/panel-assets/estilos.css" />
 </head>
 <body class="login-body">
@@ -248,20 +248,26 @@ function exigirPanel(req, res, next) {
   });
 }
 
-function esEquipo(req) {
-  return req.sesion && !req.sesion.maestro && req.sesion.papel !== "admin";
+function nivel(req) {
+  if (!req.sesion || req.sesion.maestro || req.sesion.papel === "admin") return "admin";
+  if (req.sesion.papel === "lider") return "lider";
+  return "equipo";
 }
 
-function permiteEquipo(req) {
+function permite(req) {
+  if (nivel(req) === "admin") return true;
   const m = req.method;
   const p = req.path;
-  if (m === "GET" && ["/sesion", "/sitio", "/estado", "/personas", "/equipos", "/disponibilidades", "/chats", "/mensajes", "/roles", "/caracteristicas", "/organigrama", "/tablero"].includes(p)) return true;
-  if (m === "POST" && ["/chats", "/mensajes", "/personas", "/tareas", "/tareas/orden", "/notas", "/epicas", "/sprints", "/actividad-estados"].includes(p)) return true;
-  if (m === "POST" && /^\/chats\/[^/]+\/miembros$/.test(p)) return true;
+  const lectura = ["/sesion", "/sitio", "/estado", "/personas", "/equipos", "/disponibilidades", "/chats", "/mensajes", "/roles", "/caracteristicas", "/organigrama", "/tablero"];
+  if (m === "GET" && lectura.includes(p)) return true;
+  if (m === "POST" && ["/chats", "/mensajes", "/personas", "/tareas", "/tareas/orden", "/notas"].includes(p)) return true;
   if (m === "POST" && /^\/chats\/[^/]+$/.test(p)) return true;
-  if (m === "POST" && /^\/actividad-estados\/[^/]+\/mover$/.test(p)) return true;
-  if (m === "DELETE" && /^\/tareas\/[^/]+$/.test(p)) return true;
+  if (m === "POST" && /^\/chats\/[^/]+\/miembros$/.test(p)) return true;
   if (m === "DELETE" && /^\/notas\/[^/]+$/.test(p)) return true;
+  if (nivel(req) === "equipo") return false;
+  if (m === "POST" && ["/equipos", "/epicas", "/sprints", "/actividad-estados", "/roles", "/caracteristicas", "/disponibilidades"].includes(p)) return true;
+  if (m === "POST" && /^\/actividad-estados\/[^/]+\/mover$/.test(p)) return true;
+  if (m === "DELETE" && /^\/(equipos|personas|epicas|sprints|actividad-estados|tareas|roles|caracteristicas|disponibilidades)\/[^/]+$/.test(p)) return true;
   return false;
 }
 
@@ -432,8 +438,11 @@ function iniciar(puerto, extras = {}) {
   const panel = express.Router();
   panel.use(exigirPanel);
   panel.use((req, res, next) => {
-    if (!esEquipo(req) || permiteEquipo(req)) return next();
-    res.status(403).json({ error: "Tu usuario entra al chat y a las actividades" });
+    if (permite(req)) return next();
+    const mensaje = nivel(req) === "lider"
+      ? "Tu usuario gestiona equipos y tareas"
+      : "Tu usuario edita el chat y las tareas que ya existen";
+    res.status(403).json({ error: mensaje });
   });
 
   panel.get("/sesion", (req, res) => {
@@ -556,7 +565,7 @@ function iniciar(puerto, extras = {}) {
 
   panel.post("/personas", manejar(async (req, res) => {
     let cuerpo = req.body || {};
-    if (esEquipo(req)) {
+    if (nivel(req) === "equipo") {
       if (!cuerpo.id || cuerpo.id !== req.sesion.personaId) {
         return res.status(403).json({ error: "Solo puedes actualizar tu ficha" });
       }
@@ -592,7 +601,7 @@ function iniciar(puerto, extras = {}) {
 
   panel.post("/chats", manejar(async (req, res) => {
     const cuerpo = req.body || {};
-    if (esEquipo(req)) {
+    if (nivel(req) !== "admin") {
       const ids = Array.isArray(cuerpo.personaIds) ? cuerpo.personaIds.map(String) : [];
       if (!ids.includes(req.sesion.personaId)) ids.push(req.sesion.personaId);
       cuerpo.personaIds = ids;
@@ -615,7 +624,7 @@ function iniciar(puerto, extras = {}) {
 
   panel.post("/mensajes", manejar(async (req, res) => {
     const cuerpo = req.body || {};
-    if (esEquipo(req)) cuerpo.personaId = req.sesion.personaId;
+    if (nivel(req) !== "admin") cuerpo.personaId = req.sesion.personaId;
     res.json(await operacion.guardarMensaje(cuerpo));
   }));
 
@@ -740,6 +749,9 @@ function iniciar(puerto, extras = {}) {
   }));
 
   panel.post("/tareas", manejar(async (req, res) => {
+    if (nivel(req) === "equipo" && !(req.body && req.body.id)) {
+      return res.status(403).json({ error: "Puedes editar las tareas que ya existen. Un líder crea las nuevas." });
+    }
     res.json(await operacion.guardarTarea(req.body || {}));
   }));
 
@@ -750,7 +762,7 @@ function iniciar(puerto, extras = {}) {
 
   panel.post("/notas", manejar(async (req, res) => {
     const cuerpo = req.body || {};
-    if (esEquipo(req)) cuerpo.personaId = req.sesion.personaId;
+    if (nivel(req) !== "admin") cuerpo.personaId = req.sesion.personaId;
     res.json(await operacion.guardarNota(cuerpo));
   }));
 

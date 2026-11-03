@@ -165,10 +165,18 @@ function esAdmin() {
   return sesion.maestro || sesion.papel === "admin";
 }
 
+function esLider() {
+  return sesion.papel === "lider";
+}
+
+function esGestor() {
+  return esAdmin() || esLider();
+}
+
 function aplicarSesion() {
+  const permitidas = esAdmin() ? null : esLider() ? ["equipo", "chat", "actividades"] : ["chat", "actividades"];
   document.querySelectorAll("[data-nav]").forEach((btn) => {
-    const libre = btn.dataset.nav === "chat" || btn.dataset.nav === "actividades";
-    btn.hidden = !esAdmin() && !libre;
+    btn.hidden = Boolean(permitidas && !permitidas.includes(btn.dataset.nav));
   });
   const quien = document.getElementById("quien");
   if (quien) quien.textContent = sesion.maestro ? "Clave del panel" : (sesion.nombre || sesion.usuario || "");
@@ -176,7 +184,7 @@ function aplicarSesion() {
   else {
     try { chatYo = localStorage.getItem("tavadev-chat-yo") || ""; } catch (error) { chatYo = chatYo || ""; }
   }
-  if (!esAdmin() && vista !== "chat" && vista !== "actividades") vista = "actividades";
+  if (permitidas && !permitidas.includes(vista)) vista = "actividades";
 }
 
 function elegir(etiqueta, opciones, valor, alCambiar) {
@@ -2341,12 +2349,12 @@ async function pintarChat() {
   else if (!personas.some((item) => item.id === chatYo)) chatYo = "";
   caja.innerHTML = "";
   if (internoParte === "disponibilidad") {
-    const lista = esAdmin() ? personas : personas.filter((item) => item.id === sesion.personaId);
+    const lista = esGestor() ? personas : personas.filter((item) => item.id === sesion.personaId);
     caja.append(boton("Volver al chat", "suave", () => {
       internoParte = "sala";
       ir("chat");
     }));
-    caja.append(vistaDisponibilidad(lista, disponibilidades, esAdmin()));
+    caja.append(vistaDisponibilidad(lista, disponibilidades, esGestor()));
     return;
   }
   const colorDe = (persona) => {
@@ -2886,7 +2894,7 @@ function fichaTarea(data, corte) {
     tareaAbierta = "";
     pintar();
   }));
-  if (actual) {
+  if (actual && esGestor()) {
     acciones.append(boton("Quitar", "peligro", async () => {
       try {
         await api("/api/admin/tareas/" + encodeURIComponent(actual.id), { method: "DELETE" });
@@ -2922,7 +2930,7 @@ function fichaTarea(data, corte) {
     cuando.className = "ayuda";
     cuando.textContent = horaCorta(nota.creadoEn);
     fila.append(quien, texto, cuando);
-    if (esAdmin() || nota.personaId === sesion.personaId) {
+    if (esGestor() || nota.personaId === sesion.personaId) {
       fila.append(boton("Quitar", "suave", async () => {
         try {
           await api("/api/admin/notas/" + encodeURIComponent(nota.id), { method: "DELETE" });
@@ -3016,7 +3024,7 @@ function vistaTablero(data) {
   );
   const acciones = document.createElement("div");
   acciones.className = "fila";
-  acciones.append(boton("Nueva tarea", "primario", () => { tareaAbierta = "nueva"; pintar(); }));
+  if (esGestor()) acciones.append(boton("Nueva tarea", "primario", () => { tareaAbierta = "nueva"; pintar(); }));
   const tablero = document.createElement("div");
   tablero.className = "tablero";
   const visibles = tareasVisibles(data.tareas, corte);
@@ -3107,7 +3115,7 @@ function vistaBacklog(data) {
     fila.append(nombre, meta, meter);
     card.append(fila);
   });
-  card.append(boton("Nueva tarea en el backlog", "primario", () => {
+  if (esGestor()) card.append(boton("Nueva tarea en el backlog", "primario", () => {
     tareaAbierta = "nueva";
     sprintVista = "backlog";
     actividadParte = "tablero";
@@ -3168,7 +3176,7 @@ function vistaEpicas(data) {
         toast(error.message);
       }
     }));
-    if (esAdmin()) {
+    if (esGestor()) {
       controles.append(boton("Quitar", "peligro", async () => {
         try {
           await api("/api/admin/epicas/" + encodeURIComponent(epica.id), { method: "DELETE" });
@@ -3263,7 +3271,7 @@ function vistaSprints(data) {
         }
       }));
     }
-    if (esAdmin()) {
+    if (esGestor()) {
       controles.append(boton("Quitar", "peligro", async () => {
         try {
           await api("/api/admin/sprints/" + encodeURIComponent(sprint.id), { method: "DELETE" });
@@ -3325,7 +3333,7 @@ function vistaEstadosActividad(data) {
         pintar();
       }));
     }
-    if (esAdmin()) {
+    if (esGestor()) {
       controles.append(boton("Quitar", "peligro", async () => {
         try {
           await api("/api/admin/actividad-estados/" + encodeURIComponent(estado.id), { method: "DELETE" });
@@ -3345,13 +3353,10 @@ async function pintarActividades() {
   if (reloj) clearInterval(reloj);
   reloj = null;
   vistaEl.innerHTML = "";
-  vistaEl.append(subnav([
-    ["tablero", "Tablero"],
-    ["backlog", "Backlog"],
-    ["epicas", "Épicas"],
-    ["sprints", "Sprints"],
-    ["estados", "Estados"],
-  ], actividadParte, (id) => {
+  if (!esGestor() && actividadParte !== "tablero" && actividadParte !== "backlog") actividadParte = "tablero";
+  const partesActividad = [["tablero", "Tablero"], ["backlog", "Backlog"]];
+  if (esGestor()) partesActividad.push(["epicas", "Épicas"], ["sprints", "Sprints"], ["estados", "Estados"]);
+  vistaEl.append(subnav(partesActividad, actividadParte, (id) => {
     actividadParte = id;
     ir("actividades");
   }));
@@ -3386,7 +3391,7 @@ async function pintarUsuarios() {
   caja.className = "";
   caja.textContent = "";
   const libres = personas.filter((item) => !usuarios.some((cuenta) => cuenta.personaId === item.id));
-  const form = tarjeta("Nuevo usuario", "Cada persona puede entrar con Gmail: la primera vez se crea su ficha y queda en el chat y el tablero. Desde aquí le subes el papel o la pausas. El usuario y la contraseña siguen sirviendo. Quien entra con la contraseña general deja el usuario vacío y ve todo.");
+  const form = tarjeta("Nuevo usuario", "El acceso no cambia el correo. Admin es solo tavadevadmin@gmail.com y entra con Gmail. Líder gestiona equipos y tareas. Equipo edita el chat y las tareas que ya existen.");
   if (!personas.length) {
     const p = document.createElement("p");
     p.className = "ayuda";
@@ -3402,7 +3407,7 @@ async function pintarUsuarios() {
     form.append(elegir("Persona", libres.map((item) => ({ id: item.id, nombre: etiquetaPersona(item) })), alta.personaId, (v) => (alta.personaId = v)));
     form.append(campo("Usuario", "", (v) => (alta.usuario = v)));
     form.append(campo("Contraseña", "", (v) => (alta.clave = v), "password"));
-    form.append(elegir("Papel", [{ id: "equipo", nombre: "Equipo: chat y tablero" }, { id: "admin", nombre: "Administra: todo el panel" }], alta.papel, (v) => (alta.papel = v)));
+    form.append(elegir("Papel", [{ id: "equipo", nombre: "Equipo: edita lo creado" }, { id: "lider", nombre: "Líder: equipos y tareas" }], alta.papel, (v) => (alta.papel = v)));
     form.append(boton("Crear usuario", "primario", async () => {
       try {
         await enviarJson("/api/admin/usuarios", alta);
@@ -3427,56 +3432,76 @@ async function pintarUsuarios() {
     nombre.textContent = (cuenta.nombre || "Sin ficha") + " · " + cuenta.usuario;
     const meta = document.createElement("p");
     meta.className = "ayuda";
+    const ficha = personas.find((item) => item.id === cuenta.personaId);
+    const correoVisible = cuenta.correo || (ficha && ficha.correo) || "";
+    const dueno = correoVisible.trim().toLowerCase() === "tavadevadmin@gmail.com";
+    const textoPapel = dueno || cuenta.papel === "admin"
+      ? "Administrador: todo el panel"
+      : cuenta.papel === "lider"
+        ? "Líder: equipos y tareas"
+        : "Equipo: edita lo creado";
     meta.textContent = [
-      cuenta.papel === "admin" ? "Administra el panel" : "Chat y tablero",
-      cuenta.gmail ? "Entra con Gmail" : "",
-      cuenta.correo || "",
+      textoPapel,
+      cuenta.gmail || dueno ? "Entra con Gmail" : "",
+      correoVisible,
       cuenta.activo ? "" : "en pausa",
       cuenta.cargo || "",
     ].filter(Boolean).join(" · ");
     const controles = document.createElement("div");
     controles.className = "fila";
-    controles.append(elegir("Papel", [{ id: "equipo", nombre: "Equipo" }, { id: "admin", nombre: "Administra" }], cuenta.papel, async (valor) => {
-      try {
-        await enviarJson("/api/admin/usuarios", { ...cuenta, papel: valor });
-        toast("Papel actualizado");
-        pintar();
-      } catch (error) {
-        toast(error.message);
-      }
-    }));
-    const clave = { valor: "" };
-    controles.append(campo("Nueva contraseña", "", (v) => (clave.valor = v), "password"));
-    controles.append(boton("Cambiar clave", "suave", async () => {
-      if (String(clave.valor || "").length < 6) {
-        toast("La contraseña necesita al menos 6 caracteres");
-        return;
-      }
-      try {
-        await enviarJson("/api/admin/usuarios", { ...cuenta, clave: clave.valor });
-        toast("Contraseña actualizada");
-        pintar();
-      } catch (error) {
-        toast(error.message);
-      }
-    }));
-    controles.append(boton(cuenta.activo ? "Pausar" : "Activar", "suave", async () => {
-      try {
-        await enviarJson("/api/admin/usuarios", { ...cuenta, activo: !cuenta.activo });
-        pintar();
-      } catch (error) {
-        toast(error.message);
-      }
-    }));
-    controles.append(boton("Quitar acceso", "peligro", async () => {
-      try {
-        await api("/api/admin/usuarios/" + encodeURIComponent(cuenta.id), { method: "DELETE" });
-        toast("Acceso quitado");
-        pintar();
-      } catch (error) {
-        toast(error.message);
-      }
-    }));
+    if (dueno) {
+      const fijo = document.createElement("p");
+      fijo.className = "ayuda";
+      fijo.textContent = "Este correo es el único administrador. Cambiar un permiso no cambia su correo.";
+      controles.append(fijo);
+    } else {
+      controles.append(elegir("Papel", [
+        { id: "lider", nombre: "Líder: equipos y tareas" },
+        { id: "equipo", nombre: "Equipo: edita lo creado" },
+      ], cuenta.papel === "lider" ? "lider" : "equipo", async (valor) => {
+        try {
+          await enviarJson("/api/admin/usuarios", { id: cuenta.id, papel: valor });
+          toast("Permiso actualizado");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
+    if (!dueno) {
+      const clave = { valor: "" };
+      controles.append(campo("Nueva contraseña", "", (v) => (clave.valor = v), "password"));
+      controles.append(boton("Cambiar clave", "suave", async () => {
+        if (String(clave.valor || "").length < 6) {
+          toast("La contraseña necesita al menos 6 caracteres");
+          return;
+        }
+        try {
+          await enviarJson("/api/admin/usuarios", { id: cuenta.id, clave: clave.valor });
+          toast("Contraseña actualizada");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+      controles.append(boton(cuenta.activo ? "Pausar" : "Activar", "suave", async () => {
+        try {
+          await enviarJson("/api/admin/usuarios", { id: cuenta.id, activo: !cuenta.activo });
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+      controles.append(boton("Quitar acceso", "peligro", async () => {
+        try {
+          await api("/api/admin/usuarios/" + encodeURIComponent(cuenta.id), { method: "DELETE" });
+          toast("Acceso quitado");
+          pintar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }));
+    }
     fila.append(nombre, meta, controles);
     lista.append(fila);
   });
