@@ -8,10 +8,37 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/panel-assets/estilos.css" />
 </head>
 <body>
+  <svg class="neuronas-panel" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g fill="none" stroke="currentColor" stroke-width="1.25">
+      <path d="M80 140 L240 220 L180 380 L360 460" />
+      <path d="M240 220 L420 120 L600 260" />
+      <path d="M360 460 L560 640 L760 520" />
+      <path d="M900 280 L1080 160 L1260 240" />
+      <path d="M1000 150 L1160 320 L1080 480 L1280 560" />
+      <path d="M860 560 L1100 660 L1300 480" />
+      <path class="impulso" d="M420 120 L680 80 L900 200 L1080 160" />
+      <path class="impulso impulso-lento" d="M600 260 L800 360 L860 560 L1100 660" />
+    </g>
+    <g class="nodos">
+      <circle cx="80" cy="140" r="3.2" />
+      <circle class="nodo-pulso" style="--p:0s" cx="240" cy="220" r="4" />
+      <circle cx="180" cy="380" r="3" />
+      <circle class="nodo-rosa nodo-pulso" style="--p:1.2s" cx="420" cy="120" r="4.2" />
+      <circle cx="600" cy="260" r="3.4" />
+      <circle cx="560" cy="640" r="3" />
+      <circle class="nodo-pulso" style="--p:0.7s" cx="900" cy="200" r="4" />
+      <circle class="nodo-rosa" cx="1080" cy="160" r="4.4" />
+      <circle class="nodo-pulso" style="--p:2s" cx="1160" cy="320" r="4" />
+      <circle cx="1080" cy="480" r="3.2" />
+      <circle class="nodo-rosa nodo-pulso" style="--p:1.6s" cx="1100" cy="660" r="4.6" />
+      <circle cx="1300" cy="480" r="3" />
+      <circle cx="1260" cy="240" r="3.2" />
+    </g>
+  </svg>
   <div class="app">
     <aside>
       <a class="wordmark" href="/" target="_blank" rel="noopener"><span>TAVA</span><span>DEV</span></a>
