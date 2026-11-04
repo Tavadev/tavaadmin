@@ -3531,6 +3531,19 @@ async function pintar() {
 document.querySelectorAll("[data-nav]").forEach((btn) => {
   btn.onclick = () => ir(btn.dataset.nav);
 });
+function aplicarTema(tema) {
+  const siguiente = tema === "claro" ? "claro" : "oscuro";
+  document.documentElement.dataset.tema = siguiente;
+  try { localStorage.setItem("tavadev-tema", siguiente); } catch (error) {}
+  document.querySelectorAll("[data-tema-opcion]").forEach((btn) => {
+    btn.setAttribute("aria-pressed", btn.dataset.temaOpcion === siguiente ? "true" : "false");
+  });
+}
+document.querySelectorAll("[data-tema-opcion]").forEach((btn) => {
+  btn.onclick = () => aplicarTema(btn.dataset.temaOpcion);
+});
+aplicarTema(document.documentElement.dataset.tema || "oscuro");
+
 document.getElementById("guardar").onclick = guardar;
 document.getElementById("salir").onclick = async () => {
   await fetch("/api/salir", { method: "POST" });

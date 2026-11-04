@@ -189,9 +189,23 @@ function paginaLogin(error) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/panel-assets/estilos.css" />
+  <script>
+    (function () {
+      try {
+        var tema = localStorage.getItem("tavadev-tema");
+        document.documentElement.dataset.tema = tema === "claro" ? "claro" : "oscuro";
+      } catch (e) {
+        document.documentElement.dataset.tema = "oscuro";
+      }
+    })();
+  </script>
 </head>
 <body class="login-body">
   <form class="login" id="entrar">
+    <div class="tema" role="group" aria-label="Apariencia">
+      <button type="button" data-tema-opcion="claro">Claro</button>
+      <button type="button" data-tema-opcion="oscuro">Oscuro</button>
+    </div>
     <p class="marca-login"><span>TAVA</span><span>DEV</span></p>
     <h1>Panel</h1>
     <p>Entra con Gmail. Si es tu primera vez, se crea tu ficha y quedas en el chat y el tablero. También puedes usar tu usuario. Si usas la contraseña general, deja el usuario vacío.</p>
@@ -206,6 +220,18 @@ function paginaLogin(error) {
     ${aviso}
   </form>
   <script>
+    function aplicarTema(tema) {
+      var siguiente = tema === "claro" ? "claro" : "oscuro";
+      document.documentElement.dataset.tema = siguiente;
+      try { localStorage.setItem("tavadev-tema", siguiente); } catch (e) {}
+      document.querySelectorAll("[data-tema-opcion]").forEach(function (btn) {
+        btn.setAttribute("aria-pressed", btn.getAttribute("data-tema-opcion") === siguiente ? "true" : "false");
+      });
+    }
+    document.querySelectorAll("[data-tema-opcion]").forEach(function (btn) {
+      btn.addEventListener("click", function () { aplicarTema(btn.getAttribute("data-tema-opcion")); });
+    });
+    aplicarTema(document.documentElement.dataset.tema || "oscuro");
     document.getElementById("entrar").addEventListener("submit", async (evento) => {
       evento.preventDefault();
       const clave = document.getElementById("clave").value;
