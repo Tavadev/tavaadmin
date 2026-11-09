@@ -634,6 +634,18 @@ function pintarMarca() {
     campo("Frase de la marca", sitio.marca.frase, (v) => (sitio.marca.frase = v)),
     campo("Aparte", sitio.marca.aparte, (v) => (sitio.marca.aparte = v)),
   );
+  const pixel = campo("Pixel de Facebook", sitio.marca.pixel, (v) => {
+    const limpio = String(v || "").replace(/\D/g, "").slice(0, 20);
+    sitio.marca.pixel = limpio;
+    const input = pixel.querySelector("input");
+    if (input && input.value !== limpio) input.value = limpio;
+  });
+  pixel.querySelector("input").inputMode = "numeric";
+  fotos.append(pixel);
+  const pixelAyuda = document.createElement("p");
+  pixelAyuda.className = "ayuda";
+  pixelAyuda.textContent = "Solo el número del pixel, sin el código. Vacío no mide nada. El panel no lo carga: solo la página pública, después de Guardar.";
+  fotos.append(pixelAyuda);
   const colores = tarjeta("Colores");
   const grid = document.createElement("div");
   grid.className = "colores";

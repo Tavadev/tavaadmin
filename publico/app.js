@@ -109,9 +109,35 @@ function etapa(n, nombre) {
   </div>`;
 }
 
+function instalarPixel(id) {
+  const pixel = String(id || "").replace(/\D/g, "");
+  if (!/^\d{8,20}$/.test(pixel)) return;
+  if (document.documentElement.dataset.pixel === pixel) return;
+  document.documentElement.dataset.pixel = pixel;
+  if (!window.fbq) {
+    const n = function () {
+      n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments);
+    };
+    if (!window._fbq) window._fbq = n;
+    n.push = n;
+    n.loaded = true;
+    n.version = "2.0";
+    n.queue = [];
+    window.fbq = n;
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://connect.facebook.net/en_US/fbevents.js";
+    const primero = document.getElementsByTagName("script")[0];
+    primero.parentNode.insertBefore(script, primero);
+  }
+  window.fbq("init", pixel);
+  window.fbq("track", "PageView");
+}
+
 function pintar(sitio) {
   aplicarEstilo(sitio.estilo || {});
   const marca = sitio.marca || {};
+  instalarPixel(marca.pixel);
   const logoOscuro = urlSegura(marca.logoOscuro) || "/marca/logo-oscuro.jpg";
   const logoClaro = urlSegura(marca.logoClaro) || "/marca/logo-claro.jpg";
   const quienes = sitio.quienes || {};

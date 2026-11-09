@@ -135,6 +135,7 @@ function normalizarSitio(data) {
     logoClaro: marcaIn.logoClaro != null ? urlSegura(marcaIn.logoClaro) : urlSegura(marcaBase.logoClaro),
     logoOscuro: marcaIn.logoOscuro != null ? urlSegura(marcaIn.logoOscuro) : urlSegura(marcaBase.logoOscuro),
     simbolo: urlSegura(marcaIn.simbolo),
+    pixel: String(marcaIn.pixel != null ? marcaIn.pixel : (marcaBase.pixel || "")).replace(/\D/g, "").slice(0, 20) || "2322269268610198",
   };
 
   const quienesIn = entrada.quienes || {};
